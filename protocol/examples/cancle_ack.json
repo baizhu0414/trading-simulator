@@ -1,0 +1,15 @@
+{
+  "clOrderId": "CL12345678901235",
+  "origClOrderId": "CL12345678901234",
+  "market": "XSHG",
+  "securityId": "600030",
+  "shareholderId": "SH00000001",
+  "side": "B",
+  "qty": 100,
+  "price": 10.50,
+  "cumQty": 40,
+  "canceledQty": 60
+}
+
+
+qty = cumQty + canceledQty

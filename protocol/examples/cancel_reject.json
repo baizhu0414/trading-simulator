@@ -1,0 +1,13 @@
+{
+  "clOrderId": "CL12345678901237",
+  "origClOrderId": "CL12345678909999",
+  "rejectCode": 2001,
+  "rejectText": "Original order not found or already completed"
+}
+
+
+2001：原订单不存在
+
+2002：订单已完全成交
+
+2003：无权限撤单

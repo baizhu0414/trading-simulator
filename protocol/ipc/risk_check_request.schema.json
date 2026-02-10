@@ -1,0 +1,16 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "RiskCheckRequest",
+  "type": "object",
+  "required": ["incomingOrder", "existingOrders"],
+  "properties": {
+    "incomingOrder": {
+      "$ref": "./order.schema.json"
+    },
+    "existingOrders": {
+      "type": "array",
+      "items": { "$ref": "./order.schema.json" },
+      "description": "Existing active orders in order book"
+    }
+  }
+}

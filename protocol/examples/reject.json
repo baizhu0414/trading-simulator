@@ -1,0 +1,18 @@
+{
+  "clOrderId": "CL12345678901236",
+  "market": "XSHG",
+  "securityId": "600030",
+  "side": "S",
+  "qty": 100,
+  "price": 10.40,
+  "shareholderId": "SH00000001",
+  "rejectCode": 1001,
+  "rejectText": "Self-trade risk detected"
+}
+
+
+1001：对敲风险
+
+1002：字段非法
+
+1003：价格或数量非法

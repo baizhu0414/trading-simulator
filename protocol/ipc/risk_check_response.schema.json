@@ -1,0 +1,16 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "RiskCheckResponse",
+  "type": "object",
+  "required": ["allow"],
+  "properties": {
+    "allow": {
+      "type": "boolean",
+      "description": "Whether the order is allowed to enter matching"
+    },
+    "reason": {
+      "type": "string",
+      "description": "Reject reason if allow=false"
+    }
+  }
+}

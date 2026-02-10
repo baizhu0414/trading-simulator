@@ -1,0 +1,12 @@
+{
+  "clOrderId": "CL12345678901234",
+  "market": "XSHG",
+  "securityId": "600030",
+  "side": "B",
+  "qty": 100,
+  "price": 10.50,
+  "shareholderId": "SH00000001",
+  "execId": "EX0000000001",
+  "execQty": 50,
+  "execPrice": 10.49
+}

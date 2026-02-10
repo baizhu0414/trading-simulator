@@ -1,0 +1,27 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "OrderReject",
+  "type": "object",
+  "required": [
+    "clOrderId",
+    "market",
+    "securityId",
+    "side",
+    "qty",
+    "price",
+    "shareholderId",
+    "rejectCode",
+    "rejectText"
+  ],
+  "properties": {
+    "clOrderId": { "type": "string", "maxLength": 16 },
+    "market": { "type": "string", "enum": ["XSHG", "XSHE", "BJSE"] },
+    "securityId": { "type": "string", "maxLength": 6 },
+    "side": { "type": "string", "enum": ["B", "S"] },
+    "qty": { "type": "integer" },
+    "price": { "type": "number" },
+    "shareholderId": { "type": "string", "maxLength": 10 },
+    "rejectCode": { "type": "integer" },
+    "rejectText": { "type": "string", "maxLength": 64 }
+  }
+}

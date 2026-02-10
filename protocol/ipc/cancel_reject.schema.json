@@ -1,0 +1,17 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "CancelReject",
+  "type": "object",
+  "required": [
+    "clOrderId",
+    "origClOrderId",
+    "rejectCode",
+    "rejectText"
+  ],
+  "properties": {
+    "clOrderId": { "type": "string", "maxLength": 16 },
+    "origClOrderId": { "type": "string", "maxLength": 16 },
+    "rejectCode": { "type": "integer" },
+    "rejectText": { "type": "string", "maxLength": 64 }
+  }
+}

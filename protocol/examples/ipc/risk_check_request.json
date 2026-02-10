@@ -1,0 +1,26 @@
+{
+  "incomingOrder": {
+    "clOrderId": "B2",
+    "shareholderId": "SH1",
+    "market": "XSHG",
+    "securityId": "600030",
+    "side": "BUY",
+    "qty": 100,
+    "price": 10.5,
+    "status": "NEW",
+    "timestamp": 1700000000200
+  },
+  "existingOrders": [
+    {
+      "clOrderId": "S2",
+      "shareholderId": "SH1",
+      "market": "XSHG",
+      "securityId": "600030",
+      "side": "SELL",
+      "qty": 100,
+      "price": 10.5,
+      "status": "NEW",
+      "timestamp": 1700000000100
+    }
+  ]
+}

@@ -1,0 +1,29 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "CancelAck",
+  "type": "object",
+  "required": [
+    "clOrderId",
+    "origClOrderId",
+    "market",
+    "securityId",
+    "shareholderId",
+    "side",
+    "qty",
+    "price",
+    "cumQty",
+    "canceledQty"
+  ],
+  "properties": {
+    "clOrderId": { "type": "string", "maxLength": 16 },
+    "origClOrderId": { "type": "string", "maxLength": 16 },
+    "market": { "type": "string", "enum": ["XSHG", "XSHE", "BJSE"] },
+    "securityId": { "type": "string", "maxLength": 6 },
+    "shareholderId": { "type": "string", "maxLength": 10 },
+    "side": { "type": "string", "enum": ["B", "S"] },
+    "qty": { "type": "integer" },
+    "price": { "type": "number" },
+    "cumQty": { "type": "integer" },
+    "canceledQty": { "type": "integer" }
+  }
+}

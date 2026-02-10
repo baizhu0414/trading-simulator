@@ -1,0 +1,14 @@
+[
+  {
+    "market": "XSHG",
+    "securityId": "600030",
+    "bidPrice": 10.48,
+    "askPrice": 10.52
+  },
+  {
+    "market": "XSHG",
+    "securityId": "600031",
+    "bidPrice": 8.21,
+    "askPrice": 8.25
+  }
+]

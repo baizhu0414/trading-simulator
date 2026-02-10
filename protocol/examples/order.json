@@ -1,0 +1,11 @@
+{
+  "clOrderId": "CL1234567890123456",
+  "market": "XSHG",
+  "securityId": "600030",
+  "side": "BUY",
+  "qty": 10,
+  "price": 10.5,
+  "shareholderId": "SH1234567892",
+  "status": "NEW", // "新增字段 NEW, PARTIALLY_FILLED, FILLED, CANCELED, REJECTED"
+  "timestamp": 1700000000000 // "新增字段 订单创建时间，单位毫秒"
+}

@@ -1,0 +1,30 @@
+{
+  "market": "XSHG",
+  "securityId": "600030",
+  "buyOrders": [
+    {
+      "clOrderId": "B1",
+      "shareholderId": "SH1",
+      "market": "XSHG",
+      "securityId": "600030",
+      "side": "BUY",
+      "qty": 100,
+      "price": 10.6,
+      "status": "NEW",
+      "timestamp": 1700000000001
+    }
+  ],
+  "sellOrders": [
+    {
+      "clOrderId": "S1",
+      "shareholderId": "SH2",
+      "market": "XSHG",
+      "securityId": "600030",
+      "side": "SELL",
+      "qty": 50,
+      "price": 10.5,
+      "status": "NEW",
+      "timestamp": 1700000000002
+    }
+  ]
+}

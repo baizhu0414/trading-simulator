@@ -1,0 +1,27 @@
+spring:
+  application:
+    name: trading-simulator
+
+server:
+  port: 8081
+  servlet:
+    context-path: /trading
+
+
+# 自定义配置
+trading:
+  # 风控配置
+  risk:
+    self-trade:
+      enable: true # 是否开启对敲风控
+      time-window: 60000 # 对敲检测时间窗口（毫秒）
+  # 撮合配置
+  matching:
+    price-strategy: MID_PRICE # 可选值：MID_PRICE（中间价）、BUY_PRICE（买方价）、SELL_PRICE（卖方价）
+    zero-share:
+      enable: true # 是否支持零股成交
+  # 数据存储
+  data:
+    input-path: ./data/input/
+    output-path: ./data/output/
+    history-path: ./data/history/
