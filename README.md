@@ -1,5 +1,7 @@
 #C++模块 match server，撮合模块
 
+*不要将本branch的REAMDME合并到其它branch的README中去*
+
 **当前分支由空分支创建得来，未来接口和环境与其余分支对上时可直接合并**
 
 环境配置：（待定）
