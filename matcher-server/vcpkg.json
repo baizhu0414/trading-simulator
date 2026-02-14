@@ -1,0 +1,14 @@
+{
+    "name": "matcher-server",
+    "version-string": "0.1.0",
+    "dependencies": [
+        "nlohmann-json",
+        "spdlog",
+        "gtest",
+        {
+            "name": "mysql-connector-cpp",
+            "platform": "windows | linux"
+        }
+    ],
+    "builtin-baseline": "362e54298a0f96894562c2f7b889df6897c83dc1"
+}

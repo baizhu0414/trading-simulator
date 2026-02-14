@@ -1,18 +1,20 @@
-#C++模块 match server，撮合模块
+# C++模块 match server，撮合模块
 
 *不要将本branch的REAMDME合并到其它branch的README中去*
 
 *建议采用ssh方式连接远程，避免网络不稳定无法连接github*
 
+*更具体的README.md文件请参考matcher-server/README.md*
+
 **当前分支由空分支创建得来，未来接口和环境与其余分支对上时可直接合并**
-
-环境配置：（待定）
-
-一个解析json文件的库（待定），cmake，
 
 **本分支matcher-server下有一个build文件夹未跟踪，需要自行建立**
 
-各文件夹功能
+
+
+
+
+## 各文件夹功能
 
 trading-simulator/
 
