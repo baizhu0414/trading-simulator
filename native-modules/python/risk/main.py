@@ -1,6 +1,7 @@
-import socket
 import logging
 import sys
+import json
+from risk_manager import RiskManager
 
 # 配置日志
 logging.basicConfig(
@@ -11,6 +12,9 @@ logging.basicConfig(
     ]
 )
 logger = logging.getLogger(__name__)
+
+# 初始化风控管理器
+risk_manager = RiskManager()
 
 HOST = '0.0.0.0'  # 监听所有接口
 PORT = 9002       # 定义端口
@@ -34,16 +38,28 @@ def start_server():
                                 break
                             logger.info(f"Received data: {data}")
                             
-                            # TODO: Implement strict protocol parsing based on protocol/ipc schemas
-                            # Expected Flow:
-                            # 1. Parse JSON/Protobuf message
-                            # 2. Validate against risk_check_request.schema.json
-                            # 3. Perform risk check logic
-                            # 4. Return response matching risk_check_response.schema.json
-                            
-                            # Current implementation: Echo for connectivity verification
-                            response = b"ACK: " + data
-                            conn.sendall(response)
+                            try:
+                                # 1. Parse message (Assuming JSON for now)
+                                message = json.loads(data.decode('utf-8'))
+                                
+                                # 2. Risk Check
+                                result = risk_manager.check(message)
+                                
+                                # 3. Construct Response
+                                if result["passed"]:
+                                    response_data = {"status": "RISK_PASSED", "message": result["message"]}
+                                else:
+                                    response_data = {"status": "RISK_REJECTED", "message": result["message"]}
+                                
+                                response = json.dumps(response_data).encode('utf-8')
+                                conn.sendall(response)
+                                
+                            except json.JSONDecodeError:
+                                logger.error("Invalid JSON format")
+                                conn.sendall(b'{"status": "ERROR", "message": "Invalid JSON"}')
+                            except Exception as e:
+                                logger.error(f"Error processing request: {e}")
+                                conn.sendall(f'{{"status": "ERROR", "message": "{str(e)}"}}'.encode('utf-8'))
                     except Exception as e:
                         logger.error(f"Error handling connection: {e}")
                     finally:
