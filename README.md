@@ -12,7 +12,20 @@
 
 ## 1.2 C++（开发者补充）
 
-## 1.3 Python（开发者补充）
+## 1.3 Python（风控服务）
+1. 安装 Python >= 3.10：[下载地址](https://www.python.org/downloads/)
+2. 安装依赖并启动：
+```bash
+cd native-modules/python/risk
+pip install -r requirements.txt
+python main.py
+```
+3. 服务启动后：
+   - 风控检查：`POST http://localhost:9002/api/risk/check`
+   - 健康检查：`GET  http://localhost:9002/api/risk/health`
+   - Swagger 文档：`http://localhost:9002/docs`
+4. 运行测试：`pytest tests/ -v`
+5. 接口文档：详见 `docs/risk_service_api.md`
 
 
 # 2. 项目参考架构
