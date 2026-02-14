@@ -1,6 +1,29 @@
 spring:
   application:
     name: trading-simulator
+  # MySQL数据源配置
+  datasource:
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    url: jdbc:mysql://localhost:3306/trading_db?useUnicode=true&characterEncoding=utf8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true
+    username: test
+    password: test
+  # MyBatis配置
+  mybatis:
+    mapper-locations: classpath:mapper/*.xml  # Mapper XML文件位置
+    # 全局注册TypeHandler
+    type-handlers-package: com.example.trading.common.typehandler
+    type-aliases-package: com.example.trading.domain.model  # 实体类别名包
+    configuration:
+      map-underscore-to-camel-case: true  # 下划线转驼峰（适配MySQL字段名）
+      log-impl: org.apache.ibatis.logging.slf4j.Slf4jImpl  # 打印SQL日志（便于优化）
+      default-enum-type-handler: org.apache.ibatis.type.EnumOrdinalTypeHandler # 枚举类型默认处理方式（可选）
+
+# MyBatis分页插件配置（可选）
+pagehelper:
+  helper-dialect: mysql
+  reasonable: true
+  support-methods-arguments: true
+  params: count=countSql
 
 server:
   port: 8081
@@ -15,13 +38,39 @@ trading:
     self-trade:
       enable: true # 是否开启对敲风控
       time-window: 60000 # 对敲检测时间窗口（毫秒）
+
   # 撮合配置
   matching:
     price-strategy: MID_PRICE # 可选值：MID_PRICE（中间价）、BUY_PRICE（买方价）、SELL_PRICE（卖方价）
     zero-share:
       enable: true # 是否支持零股成交
-  # 数据存储
-  data:
-    input-path: ./data/input/
-    output-path: ./data/output/
-    history-path: ./data/history/
+
+  recovery:
+    enable: true
+    recover-status: NEW,PROCESSING,MATCHING,NOT_FILLED # 应用崩溃或其他情况，重启加载未完成订单。
+    batch-size: 100
+
+# 监控配置
+management:
+  endpoints:
+    web:
+      exposure:
+        include: prometheus,health,metrics,info  # 暴露Prometheus可抓取的端点
+      base-path: /actuator  # Actuator 默认基础路径，在prometheus.yml中使用
+  metrics:
+    tags:
+      application: trading-system  # 标记应用名称（便于多实例监控）
+  endpoint:
+    health:
+      show-details: always  # 显示健康详情
+    prometheus:
+      enabled: true # Deprecated.
+  prometheus:
+    metrics:
+      export:
+        enabled: true
+
+# 自定义监控指标前缀
+micrometer:
+  metrics:
+    prefix: trading
