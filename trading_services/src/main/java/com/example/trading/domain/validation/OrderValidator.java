@@ -6,12 +6,14 @@ import com.example.trading.common.enums.SideEnum;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
+import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 
 /**
  * 订单基础校验器（无业务含义的基础校验）
+ * 修复：BigDecimal价格比较 + 买卖方向校验空指针 + 逻辑优化
  */
 @Slf4j
 @Component
@@ -54,8 +56,8 @@ public class OrderValidator {
             errors.add(ErrorCodeEnum.MARKET_INVALID);
         }
 
-        // 3. 买卖方向合法性
-        if (order.getSide() == null && order.getSide().getCode() != null) {
+        // 3. 买卖方向合法性（核心修复：空指针+逻辑错误）
+        if (order.getSide() != null) { // 先判断非空，避免NullPointerException
             if (SideEnum.getByCode(order.getSide().getCode()) == null) {
                 errors.add(ErrorCodeEnum.SIDE_INVALID);
             }
@@ -66,9 +68,17 @@ public class OrderValidator {
             errors.add(ErrorCodeEnum.QTY_INVALID);
         }
 
-        // 5. 价格合法性
-        if (order.getPrice() != null && order.getPrice() < 0) {
+        // 5. 价格合法性（核心修复：BigDecimal不能直接用<，改用compareTo）
+        if (order.getPrice() != null && order.getPrice().compareTo(BigDecimal.ZERO) < 0) {
             errors.add(ErrorCodeEnum.PRICE_INVALID);
+        }
+
+        // 补充到OrderValidator的validate方法中
+        if (order.getClOrderId() != null && order.getClOrderId().length() != 16) {
+            errors.add(ErrorCodeEnum.PARAM_FAILED);
+        }
+        if (order.getShareholderId() != null && order.getShareholderId().length() != 10) {
+            errors.add(ErrorCodeEnum.PARAM_FAILED);
         }
 
         log.info("订单{}基础校验完成，错误数：{}", order.getClOrderId(), errors.size());
