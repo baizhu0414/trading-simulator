@@ -1,0 +1,90 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="com.example.trading.mapper.OrderMapper">
+    <!-- 通用结果映射（移除根节点的非法typeHandler标签，仅在resultMap/语句中指定） -->
+    <resultMap id="OrderResultMap" type="com.example.trading.domain.model.Order">
+        <id column="id" property="id"/>
+        <result column="cl_order_id" property="clOrderId"/>
+        <result column="shareholder_id" property="shareholderId"/>
+        <result column="market" property="market"/>
+        <result column="security_id" property="securityId"/>
+        <!-- 直接指定自定义TypeHandler路径，无需根节点声明 -->
+        <result column="side" property="side" typeHandler="com.example.trading.common.typehandler.SideEnumTypeHandler"/>
+        <result column="qty" property="qty"/>
+        <result column="price" property="price"/>
+        <!--（从 0 开始）数OrderStatusEnum的枚举项-->
+        <result column="status" property="status" typeHandler="org.apache.ibatis.type.EnumOrdinalTypeHandler"/>
+        <result column="create_time" property="createTime"/>
+        <result column="version" property="version"/>
+    </resultMap>
+
+    <!-- 插入订单（返回自增主键） -->
+    <insert id="insert" parameterType="com.example.trading.domain.model.Order" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO t_exchange_order (
+            cl_order_id, shareholder_id, market, security_id,
+            side, qty, price, status, create_time, version
+        ) VALUES (
+                     #{clOrderId}, #{shareholderId}, #{market}, #{securityId},
+                     #{side,typeHandler=com.example.trading.common.typehandler.SideEnumTypeHandler},
+                     #{qty}, #{price}, #{status,typeHandler=org.apache.ibatis.type.EnumOrdinalTypeHandler},
+                     #{createTime}, #{version}
+                 )
+    </insert>
+
+    <!-- 根据业务单号查询订单 -->
+    <select id="selectByClOrderId" parameterType="String" resultMap="OrderResultMap">
+        SELECT * FROM t_exchange_order WHERE cl_order_id = #{clOrderId}
+    </select>
+
+    <!-- 根据状态列表查询订单 -->
+    <select id="selectByStatusIn" parameterType="java.util.List" resultMap="OrderResultMap">
+        SELECT * FROM t_exchange_order
+        WHERE status IN
+        <foreach collection="statusList" item="status" open="(" separator="," close=")">
+            #{status,typeHandler=org.apache.ibatis.type.EnumOrdinalTypeHandler}
+        </foreach>
+        ORDER BY create_time ASC
+    </select>
+
+    <!-- 替换原有selectByStatusIn，增加24小时超时过滤 -->
+    <select id="selectByStatusInAndCreateTimeAfter" parameterType="map" resultMap="OrderResultMap">
+        SELECT id, cl_order_id, shareholder_id, market, security_id,
+        side, qty, price, status, create_time, version
+        FROM t_exchange_order
+        WHERE status IN
+        <foreach collection="statusList" item="status" open="(" separator="," close=")">
+            #{status,typeHandler=org.apache.ibatis.type.EnumOrdinalTypeHandler}
+        </foreach>
+        AND create_time >= #{expireTime}
+        ORDER BY create_time ASC
+    </select>
+
+    <!-- 更新订单（含乐观锁：version匹配才更新） -->
+    <update id="updateById" parameterType="com.example.trading.domain.model.Order">
+        UPDATE t_exchange_order
+        SET
+            cl_order_id = #{clOrderId},
+            shareholder_id = #{shareholderId},
+            market = #{market},
+            security_id = #{securityId},
+            side = #{side,typeHandler=com.example.trading.common.typehandler.SideEnumTypeHandler},
+            qty = #{qty},
+            price = #{price},
+            status = #{status,typeHandler=org.apache.ibatis.type.EnumOrdinalTypeHandler},
+            create_time = #{createTime},
+            version = version + 1 -- 版本号自增
+        WHERE id = #{id} AND version = #{version} -- 乐观锁条件
+    </update>
+
+    <!-- 判断订单是否存在 -->
+    <select id="existsByClOrderId" parameterType="String" resultType="boolean">
+        SELECT COUNT(1) > 0 FROM t_exchange_order WHERE cl_order_id = #{clOrderId}
+    </select>
+
+    <!--    根据订单状态查询订单，比如加载未成交订单-->
+    <select id="selectByStatus" parameterType="com.example.trading.common.enums.OrderStatusEnum" resultMap="OrderResultMap">
+        SELECT * FROM t_exchange_order WHERE status = #{status,typeHandler=org.apache.ibatis.type.EnumOrdinalTypeHandler}
+    </select>
+</mapper>

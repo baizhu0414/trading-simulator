@@ -14,3 +14,11 @@
 2. 撤单支持：处理撤单请求，输出撤单确认/非法回报
 3. 性能优化：分析瓶颈并优化吞吐量/延时
 4. 数据分析：存储交易历史并输出分析结果
+
+
+## trading_services Java模块功能支持
+
+- Java 主控服务（Spring Boot）
+- 交易接入、订单状态管理、回报生成
+- Java 版本 MatchingEngine（功能不保证完整、作为系统兜底）
+- IPC Adapter（Java → C++ / Python 客户端）
