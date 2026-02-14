@@ -33,7 +33,15 @@ def start_server():
                             if not data:
                                 break
                             logger.info(f"Received data: {data}")
-                            # 简单的 Echo 响应，后续替换为实际风控逻辑
+                            
+                            # TODO: Implement strict protocol parsing based on protocol/ipc schemas
+                            # Expected Flow:
+                            # 1. Parse JSON/Protobuf message
+                            # 2. Validate against risk_check_request.schema.json
+                            # 3. Perform risk check logic
+                            # 4. Return response matching risk_check_response.schema.json
+                            
+                            # Current implementation: Echo for connectivity verification
                             response = b"ACK: " + data
                             conn.sendall(response)
                     except Exception as e:
