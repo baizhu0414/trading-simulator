@@ -12,7 +12,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 find_package(nlohmann_json CONFIG REQUIRED)
 find_package(spdlog CONFIG REQUIRED)
 find_package(GTest CONFIG REQUIRED)
-# find_package(mysql-connector-cpp CONFIG REQUIRED) # 根据需要开启
+find_package(mysql-connector-cpp CONFIG REQUIRED) # 根据需要开启
 
 # 包含头文件目录
 include_directories(include)
@@ -25,8 +25,11 @@ add_library(matcher_core
 # 指定头文件搜索路径
 target_include_directories(matcher_core PUBLIC include)
 # 链接依赖
-target_link_libraries(matcher_core PRIVATE nlohmann_json::nlohmann_json spdlog::spdlog)
-
+target_link_libraries(matcher_core PRIVATE 
+    nlohmann_json::nlohmann_json 
+    spdlog::spdlog 
+    mysql-connector-cpp::mysqlclient # vcpkg 中 mysql-connector-cpp 暴露的 target
+)
 # 2. 可执行文件 (Executable)
 add_executable(matcher_server src/main.cpp)
 target_link_libraries(matcher_server PRIVATE matcher_core)

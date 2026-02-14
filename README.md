@@ -4,7 +4,7 @@
 
 *建议采用ssh方式连接远程，避免网络不稳定无法连接github*
 
-*更具体的README.md文件请参考matcher-server/README.md*
+*更具体的README.md文件请参考matcher-server/README.md，本文件已经过时*
 
 **当前分支由空分支创建得来，未来接口和环境与其余分支对上时可直接合并**
 

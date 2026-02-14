@@ -36,7 +36,7 @@
 * nlohmann-json: JSON 序列化/反序列化  
 * spdlog: 高性能异步日志  
 * gtest: 单元测试框架  
-* mysql-connector-cpp: 数据库连接 (可选)
+* mysql-connector-cpp: 数据库连接 
 
 ## **4\. 构建步骤 (Build Instructions)**
 
