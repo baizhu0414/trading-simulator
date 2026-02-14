@@ -1,10 +1,16 @@
 package com.example.trading.domain.engine;
 
+import com.example.trading.common.enums.OrderStatusEnum;
 import com.example.trading.domain.model.Order;
 import com.example.trading.common.enums.SideEnum;
+import io.micrometer.core.instrument.Gauge;
+import io.micrometer.core.instrument.MeterRegistry;
+import jakarta.annotation.PostConstruct;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
+import java.math.BigDecimal;
 import java.util.Comparator;
 import java.util.Queue;
 import java.util.concurrent.ConcurrentHashMap;
@@ -13,36 +19,84 @@ import java.util.concurrent.ConcurrentSkipListMap;
 import java.util.concurrent.LinkedBlockingQueue;
 
 /**
- * 订单簿
- * 核心特性：
- * 1. 买队列（BUY）：价格降序排列（高价优先），同价格按时间戳升序；
- * 2. 卖队列（SELL）：价格升序排列（低价优先），同价格按时间戳升序；
- * 3. 全线程安全：基于ConcurrentSkipListMap + LinkedBlockingQueue实现，无显式锁；
- * 4. 按股票代码隔离订单簿，避免跨股票撮合。
+ * 订单簿（修正价格类型为BigDecimal，解决类型不匹配+精度丢失问题）
  */
 @Slf4j
 @Component
+@RequiredArgsConstructor
 public class OrderBook {
     /**
-     * 订单簿核心存储结构：
-     * - 第一层Key：securityId（股票代码）
-     * - 第二层Key：SideEnum（买卖方向）
-     * - 第三层：ConcurrentSkipListMap（价格有序Map），Key=价格，Value=该价格下的订单队列
+     * 核心修改1：价格类型从Double改为BigDecimal
+     * 第一层Key：securityId（股票代码）
+     * 第二层Key：SideEnum（买卖方向）
+     * 第三层：ConcurrentSkipListMap（价格有序Map），Key=BigDecimal价格，Value=该价格下的订单队列
+     * 示例：
+     * orderBookMap（ConcurrentMap）
+     * ├─ Key: securityId（如600030）→ 股票维度（第一层）
+     * │  └─ Value: ConcurrentMap<SideEnum, ConcurrentSkipListMap<BigDecimal, Queue<Order>>>
+     * │     ├─ Key: SideEnum.BUY → 买卖方向（第二层）
+     * │     │  └─ Value: ConcurrentSkipListMap<BigDecimal, Queue<Order>>（价格降序）
+     * │     │     ├─ Key: 10.50 → 价格维度（第三层）
+     * │     │     │  └─ Value: Queue<Order> → 该价格下的买单队列（时间优先）
+     * │     │     └─ Key: 10.40
+     * │     └─ Key: SideEnum.SELL → 买卖方向（第二层）
+     * │        └─ Value: ConcurrentSkipListMap<BigDecimal, Queue<Order>>（价格升序）
+     * │           ├─ Key: 10.50 → 价格维度（第三层）
+     * │           └─ Key: 10.60
+     * └─ Key: 600016 → 另一支股票（第一层）
+     *    └─ ...
      */
-    private final ConcurrentMap<String, ConcurrentMap<SideEnum, ConcurrentSkipListMap<Double, Queue<Order>>>> orderBookMap =
+    private final ConcurrentMap<String, ConcurrentMap<SideEnum, ConcurrentSkipListMap<BigDecimal, Queue<Order>>>> orderBookMap =
             new ConcurrentHashMap<>();
 
+    private final MeterRegistry meterRegistry;
+    private Gauge buyQueueSizeGauge;
+    private Gauge sellQueueSizeGauge;
+
+    @PostConstruct
+    public void initMetrics() {
+        buyQueueSizeGauge = Gauge.builder("trading.orderbook.buy.total_size", () -> {
+            int totalBuySize = 0;
+            for (ConcurrentMap<SideEnum, ConcurrentSkipListMap<BigDecimal, Queue<Order>>> sideMap : orderBookMap.values()) {
+                // 核心修改2：价格Map类型同步改为BigDecimal
+                ConcurrentSkipListMap<BigDecimal, Queue<Order>> buyPriceMap = sideMap.get(SideEnum.BUY);
+                if (buyPriceMap != null) {
+                    for (Queue<Order> orderQueue : buyPriceMap.values()) {
+                        totalBuySize += orderQueue.size();
+                    }
+                }
+            }
+            return totalBuySize;
+        }).description("订单簿买队列总订单数").register(meterRegistry);
+
+        sellQueueSizeGauge = Gauge.builder("trading.orderbook.sell.total_size", () -> {
+            int totalSellSize = 0;
+            for (ConcurrentMap<SideEnum, ConcurrentSkipListMap<BigDecimal, Queue<Order>>> sideMap : orderBookMap.values()) {
+                // 核心修改3：价格Map类型同步改为BigDecimal
+                ConcurrentSkipListMap<BigDecimal, Queue<Order>> sellPriceMap = sideMap.get(SideEnum.SELL);
+                if (sellPriceMap != null) {
+                    for (Queue<Order> orderQueue : sellPriceMap.values()) {
+                        totalSellSize += orderQueue.size();
+                    }
+                }
+            }
+            return totalSellSize;
+        }).description("订单簿卖队列总订单数").register(meterRegistry);
+
+        log.info("订单簿监控指标初始化完成");
+    }
+
     /**
-     * 初始化指定股票的订单簿（首次访问时自动初始化）
+     * 初始化指定股票的订单簿
      */
     private void initOrderBook(String securityId) {
         orderBookMap.computeIfAbsent(securityId, key -> {
-            // 初始化买卖方向的价格有序Map
-            ConcurrentMap<SideEnum, ConcurrentSkipListMap<Double, Queue<Order>>> sideMap = new ConcurrentHashMap<>();
+            ConcurrentMap<SideEnum, ConcurrentSkipListMap<BigDecimal, Queue<Order>>> sideMap = new ConcurrentHashMap<>();
 
-            // 买队列：价格降序（高价优先），Comparator.reverseOrder()实现降序
+            // 核心修改4：BigDecimal的Comparator（替代double的Comparator）
+            // 买队列：价格降序（高价优先），使用BigDecimal的compareTo方法
             sideMap.put(SideEnum.BUY, new ConcurrentSkipListMap<>(Comparator.reverseOrder()));
-            // 卖队列：价格升序（低价优先），自然序（默认）
+            // 卖队列：价格升序（低价优先），自然序（BigDecimal默认按数值比较）
             sideMap.put(SideEnum.SELL, new ConcurrentSkipListMap<>(Comparator.naturalOrder()));
 
             log.info("初始化股票[{}]的订单簿", securityId);
@@ -51,8 +105,7 @@ public class OrderBook {
     }
 
     /**
-     * 添加订单到订单簿（线程安全）
-     * 逻辑：按「股票+方向+价格」分层存储，同价格订单按时间戳排队
+     * 添加订单到订单簿（解决类型不匹配核心行）
      */
     public void addOrder(Order order) {
         if (order == null || order.getSecurityId() == null || order.getSide() == null) {
@@ -60,20 +113,20 @@ public class OrderBook {
             return;
         }
 
+        // 核心新增：状态校验，仅允许NOT_FILLED/MATCHING订单加入
+        if (order.getStatus() != OrderStatusEnum.NOT_FILLED && order.getStatus() != OrderStatusEnum.MATCHING) {
+            log.error("订单[{}]状态非法（{}），无法加入订单簿", order.getClOrderId(), order.getStatus().getDesc());
+            return;
+        }
+
         String securityId = order.getSecurityId();
         SideEnum side = order.getSide();
-        double price = order.getPrice();
+        BigDecimal price = order.getPrice();
 
-        // 1. 初始化订单簿（若未初始化）
         initOrderBook(securityId);
-
-        // 2. 获取该股票+方向的价格有序Map
-        ConcurrentSkipListMap<Double, Queue<Order>> priceMap = orderBookMap.get(securityId).get(side);
-
-        // 3. 按价格获取/创建订单队列（LinkedBlockingQueue保证线程安全）
+        ConcurrentSkipListMap<BigDecimal, Queue<Order>> priceMap = orderBookMap.get(securityId).get(side);
         Queue<Order> orderQueue = priceMap.computeIfAbsent(price, k -> new LinkedBlockingQueue<>());
 
-        // 4. 添加订单到队列（LinkedBlockingQueue的offer方法线程安全）
         boolean added = orderQueue.offer(order);
         if (added) {
             log.info("订单[{}]已加入[{}]方向订单簿，股票[{}]，价格[{}]，队列长度[{}]",
@@ -84,15 +137,16 @@ public class OrderBook {
     }
 
     /**
-     * 获取指定股票+方向的价格有序Map（用于撮合引擎匹配最优价格）
+     * 获取指定股票+方向的价格有序Map（返回BigDecimal类型）
      */
-    public ConcurrentSkipListMap<Double, Queue<Order>> getPriceMap(String securityId, SideEnum side) {
+    // 核心修改6：返回值类型改为BigDecimal
+    public ConcurrentSkipListMap<BigDecimal, Queue<Order>> getPriceMap(String securityId, SideEnum side) {
         initOrderBook(securityId);
         return orderBookMap.get(securityId).get(side);
     }
 
     /**
-     * 从订单簿移除指定订单（线程安全）
+     * 从订单簿移除指定订单
      */
     public boolean removeOrder(Order order) {
         if (order == null || order.getSecurityId() == null || order.getSide() == null) {
@@ -102,7 +156,8 @@ public class OrderBook {
 
         String securityId = order.getSecurityId();
         SideEnum side = order.getSide();
-        double price = order.getPrice();
+        // 核心修改7：直接获取BigDecimal类型的price
+        BigDecimal price = order.getPrice();
 
         // 1. 校验订单簿是否存在
         if (!orderBookMap.containsKey(securityId)) {
@@ -110,18 +165,18 @@ public class OrderBook {
             return false;
         }
 
-        // 2. 获取价格Map和订单队列
-        ConcurrentSkipListMap<Double, Queue<Order>> priceMap = orderBookMap.get(securityId).get(side);
+        // 2. 获取价格Map和订单队列（BigDecimal类型）
+        ConcurrentSkipListMap<BigDecimal, Queue<Order>> priceMap = orderBookMap.get(securityId).get(side);
         Queue<Order> orderQueue = priceMap.get(price);
         if (orderQueue == null || orderQueue.isEmpty()) {
             log.warn("订单[{}]对应的价格[{}]队列不存在/为空，无法移除", order.getClOrderId(), price);
             return false;
         }
 
-        // 3. 移除订单（LinkedBlockingQueue的remove方法线程安全）
+        // 3. 移除订单
         boolean removed = orderQueue.removeIf(o -> o.getClOrderId().equals(order.getClOrderId()));
 
-        // 4. 若队列空，移除该价格节点（避免空队列占用内存）
+        // 4. 若队列空，移除该价格节点
         if (removed && orderQueue.isEmpty()) {
             priceMap.remove(price);
             log.info("订单[{}]移除后，价格[{}]队列已空，移除该价格节点", order.getClOrderId(), price);
@@ -138,7 +193,7 @@ public class OrderBook {
     }
 
     /**
-     * 清空指定股票的订单簿（测试/重置时使用）
+     * 清空指定股票的订单簿
      */
     public void clearOrderBook(String securityId) {
         if (orderBookMap.containsKey(securityId)) {
