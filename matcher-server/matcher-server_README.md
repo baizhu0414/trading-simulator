@@ -36,7 +36,7 @@
 * nlohmann-json: JSON 序列化/反序列化  
 * spdlog: 高性能异步日志  
 * gtest: 单元测试框架  
-* mysql-connector-cpp: 数据库连接 
+* mysql-connector-cpp: 数据库连接 （仅用于测试，生产环境中由java层管理）
 
 ## **4\. 构建步骤 (Build Instructions)**
 
@@ -45,6 +45,8 @@
 CMake 会自动检测 vcpkg 并安装所有依赖。
 
 **Windows (PowerShell):**
+
+*本部分需要根据开发者的环境调整*
 
 \# 假设环境变量 VCPKG\_ROOT 已设置，否则添加: \-DCMAKE\_TOOLCHAIN\_FILE="C:/path/to/vcpkg/scripts/buildsystems/vcpkg.cmake"  
 cmake \-B build \-S . \-DCMAKE\_TOOLCHAIN\_FILE="$env:VCPKG\_ROOT/scripts/buildsystems/vcpkg.cmake"
