@@ -113,8 +113,10 @@ public class OrderBook {
             return;
         }
 
-        // 核心新增：状态校验，仅允许NOT_FILLED/MATCHING订单加入
-        if (order.getStatus() != OrderStatusEnum.NOT_FILLED && order.getStatus() != OrderStatusEnum.MATCHING) {
+        // 核心新增：状态校验，仅允许NOT_FILLED/MATCHING/PART_FILLED订单加入（可继续撮合）
+        if (order.getStatus() != OrderStatusEnum.NOT_FILLED
+                && order.getStatus() != OrderStatusEnum.MATCHING
+                && order.getStatus() != OrderStatusEnum.PART_FILLED) {
             log.error("订单[{}]状态非法（{}），无法加入订单簿", order.getClOrderId(), order.getStatus().getDesc());
             return;
         }

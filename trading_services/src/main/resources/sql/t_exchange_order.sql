@@ -7,7 +7,7 @@ DEFAULT COLLATE utf8mb4_unicode_ci;
 USE trading_db;
 
 -- 3. 建表（适配字段规则+约束）
-CREATE TABLE `t_exchange_order` (
+CREATE TABLE IF NOT EXISTS `t_exchange_order` (
                                     `id` bigint(20) NOT NULL AUTO_INCREMENT COMMENT '数据库自增主键',
                                     `cl_order_id` varchar(16) NOT NULL COMMENT '订单唯一编号（业务主键，固定16位）',
                                     `shareholder_id` varchar(10) NOT NULL COMMENT '股东号（固定10位）',
@@ -29,3 +29,17 @@ CREATE TABLE `t_exchange_order` (
                                     CONSTRAINT `chk_side` CHECK (`side` IN ('B', 'S')),
                                     CONSTRAINT `chk_qty_unsigned` CHECK (`qty` >= 0)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='交易所订单表';
+
+
+-- 新增字段，实现部分成交功能
+USE trading_db;
+
+-- 新增original_qty字段（原始订单数量）
+ALTER TABLE `t_exchange_order`
+    ADD COLUMN `original_qty` int UNSIGNED NOT NULL COMMENT '原始订单数量（创建时固定）' AFTER `qty`;
+
+-- 初始化历史数据：original_qty = qty（保证存量数据兼容）
+UPDATE `t_exchange_order` SET `original_qty` = `qty` WHERE `original_qty` IS NULL;
+
+-- 新增索引（可选，优化部分成交订单查询）
+ALTER TABLE `t_exchange_order` ADD KEY `idx_securityid_status` (`security_id`, `status`);

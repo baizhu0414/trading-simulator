@@ -42,7 +42,7 @@ public class OrderRecoveryService implements CommandLineRunner {
     private boolean recoveryEnable;
 
     // 核心修改1：默认恢复状态加入NOT_FILLED（未成交订单需恢复）
-    @Value("${trading.recovery.recover-status:NEW,PROCESSING,MATCHING,NOT_FILLED}")
+    @Value("${trading.recovery.recover-status:NEW,PROCESSING,MATCHING,NOT_FILLED,PART_FILLED}")
     private String recoverStatus;
 
     @Value("${trading.recovery.batch-size:100}")
@@ -179,10 +179,10 @@ public class OrderRecoveryService implements CommandLineRunner {
                     continue;
                 }
 
-                // 2. 终态订单处理（仅NOT_FILLED需要恢复）
+                // 2. 终态订单处理
                 if (order.getStatus().isFinalStatus()) {
                     if (order.getStatus() == OrderStatusEnum.NOT_FILLED) {
-                        // 未成交订单：直接加入OrderBook
+                        // 未成交订单也属于终态：直接加入OrderBook
                         orderBook.addOrder(order);
                         log.info("【订单恢复】订单[{}]（未成交）重新加入订单簿", order.getClOrderId());
                         successCount++;
@@ -195,8 +195,8 @@ public class OrderRecoveryService implements CommandLineRunner {
                     continue;
                 }
 
-                // 3. 非终态订单处理
-                if (order.getStatus() == OrderStatusEnum.MATCHING) {
+                // 3. 非终态订单处理（PART_FILLED逻辑）
+                if (order.getStatus() == OrderStatusEnum.MATCHING || order.getStatus() == OrderStatusEnum.PART_FILLED) {
                     // 撮合中：加入OrderBook + 重置为NOT_FILLED（终态，避免状态残留）
                     order.setStatus(OrderStatusEnum.NOT_FILLED);
                     orderMapper.updateById(order);

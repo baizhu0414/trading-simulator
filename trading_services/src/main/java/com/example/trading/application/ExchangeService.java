@@ -88,6 +88,7 @@ public class ExchangeService {
         try {
             // 1. JSON解析
             order = JsonUtils.fromJson(orderJson, Order.class);
+            order.setOriginalQty(order.getQty()); // 设定股数初始值
             if (order == null) {
                 log.error("订单JSON解析失败，内容：{}", orderJson);
                 orderFailedCounter.increment();
@@ -111,17 +112,9 @@ public class ExchangeService {
 
             // 3. 幂等校验（核心修改：加载已存在的未成交订单到OrderBook）
             if (orderMapper.existsByClOrderId(clOrderId)) {
-                Optional<Order> existOrder = orderMapper.selectByClOrderId(clOrderId);
-                if (existOrder.isPresent()) {
-                    Order exist = existOrder.get();
-                    // 若订单是未成交状态，加载到OrderBook
-                    if (exist.getStatus() == OrderStatusEnum.NOT_FILLED) {
-                        orderBook.addOrder(exist);
-                        log.info("幂等校验：订单[{}]为未成交状态，已加载到OrderBook", clOrderId);
-                    }
-                    log.info("订单[{}]已存在（幂等校验），返回已有结果", clOrderId);
-                    return JsonUtils.toJson(exist);
-                }
+                log.info("订单[{}]已存在（幂等校验），返回订单号已存在错误响应", clOrderId);
+                orderRejectCounter.increment(); // 计入拒绝指标
+                return buildRejectResponse(order, ErrorCodeEnum.ORDER_EXISTED);
             }
 
             orderTotalCounter.increment();
@@ -147,10 +140,14 @@ public class ExchangeService {
     public String processOrderInTransaction(Order order) {
         String clOrderId = order.getClOrderId();
         try {
+            // 初始化订单（修复：确保originalQty不为空）
+            if (order.getOriginalQty() == null) {
+                order.setOriginalQty(order.getQty());
+            }
             // 初始化订单状态
             order.setStatus(OrderStatusEnum.NEW);
             orderMapper.insert(order);
-            log.info("订单[{}]初始化完成，状态：NEW", clOrderId);
+            log.info("订单[{}]初始化完成，状态：NEW，原始数量：{}", clOrderId, order.getOriginalQty());
 
             // 5. 基础校验
             order.setStatus(OrderStatusEnum.PROCESSING);
@@ -177,13 +174,27 @@ public class ExchangeService {
             // 7. 撮合（零股成交）
             order.setStatus(OrderStatusEnum.MATCHING);
             Order matchedOrder = matchingEngine.match(order);
-            // 更新最终状态（完全成交/正常未成交）
+            // 核心修改：状态判断逻辑（区分完全/部分/未成交）
             if (matchedOrder.getQty() == 0) {
+                // 剩余数量=0 → 完全成交
                 matchedOrder.setStatus(OrderStatusEnum.FULL_FILLED);
+            } else if (matchedOrder.getQty() < matchedOrder.getOriginalQty()) {
+                // 剩余数量 < 原始数量 → 部分成交
+                matchedOrder.setStatus(OrderStatusEnum.PART_FILLED);
             } else {
+                // 剩余数量 = 原始数量 → 未成交
                 matchedOrder.setStatus(OrderStatusEnum.NOT_FILLED);
             }
-            orderMapper.updateById(matchedOrder);
+            int updateCount = orderMapper.updateById(matchedOrder);
+            if (updateCount > 0) {
+                log.info("新订单[{}]更新成功：原始数量{}，剩余数量{}，状态{}，更新行数{}",
+                        matchedOrder.getClOrderId(), matchedOrder.getOriginalQty(),
+                        matchedOrder.getQty(), matchedOrder.getStatus().getDesc(), updateCount);
+            } else {
+                log.error("新订单[{}]更新失败：乐观锁冲突，version={}",
+                        matchedOrder.getClOrderId(), matchedOrder.getVersion());
+                throw new RuntimeException("新订单更新失败（乐观锁冲突）");
+            }
 
             orderSuccessCounter.increment();
             log.info("订单[{}]处理完成，最终状态：{}", clOrderId, matchedOrder.getStatus().getDesc());

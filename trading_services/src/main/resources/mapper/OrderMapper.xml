@@ -12,6 +12,8 @@
         <result column="security_id" property="securityId"/>
         <!-- 直接指定自定义TypeHandler路径，无需根节点声明 -->
         <result column="side" property="side" typeHandler="com.example.trading.common.typehandler.SideEnumTypeHandler"/>
+        <!-- 新增 -->
+        <result column="original_qty" property="originalQty"/>
         <result column="qty" property="qty"/>
         <result column="price" property="price"/>
         <!--（从 0 开始）数OrderStatusEnum的枚举项-->
@@ -24,11 +26,12 @@
     <insert id="insert" parameterType="com.example.trading.domain.model.Order" useGeneratedKeys="true" keyProperty="id">
         INSERT INTO t_exchange_order (
             cl_order_id, shareholder_id, market, security_id,
-            side, qty, price, status, create_time, version
+            side, original_qty, qty, price, status, create_time, version
         ) VALUES (
                      #{clOrderId}, #{shareholderId}, #{market}, #{securityId},
                      #{side,typeHandler=com.example.trading.common.typehandler.SideEnumTypeHandler},
-                     #{qty}, #{price}, #{status,typeHandler=org.apache.ibatis.type.EnumOrdinalTypeHandler},
+                     #{originalQty}, #{qty}, #{price},
+                     #{status,typeHandler=org.apache.ibatis.type.EnumOrdinalTypeHandler},
                      #{createTime}, #{version}
                  )
     </insert>
@@ -51,7 +54,7 @@
     <!-- 替换原有selectByStatusIn，增加24小时超时过滤 -->
     <select id="selectByStatusInAndCreateTimeAfter" parameterType="map" resultMap="OrderResultMap">
         SELECT id, cl_order_id, shareholder_id, market, security_id,
-        side, qty, price, status, create_time, version
+        side, original_qty, qty, price, status, create_time, version
         FROM t_exchange_order
         WHERE status IN
         <foreach collection="statusList" item="status" open="(" separator="," close=")">
@@ -70,6 +73,7 @@
             market = #{market},
             security_id = #{securityId},
             side = #{side,typeHandler=com.example.trading.common.typehandler.SideEnumTypeHandler},
+            original_qty = #{originalQty},
             qty = #{qty},
             price = #{price},
             status = #{status,typeHandler=org.apache.ibatis.type.EnumOrdinalTypeHandler},

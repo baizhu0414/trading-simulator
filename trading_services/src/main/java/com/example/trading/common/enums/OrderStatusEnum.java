@@ -4,8 +4,7 @@ import lombok.Getter;
 
 /**
  * 订单状态枚举（优化：新增正常未成交状态，区分异常拒绝和正常未成交）
- * TODO：
- *      注意：此处的状态顺序不允许改动，因为数据库存储的就是顺序，后续可能需要优化。只允许在后面新增。
+ * **注意**：真正开始使用之后，此处的状态顺序不允许改动，因为数据库存储的就是顺序，后续可能需要优化。只允许在后面新增。
  */
 @Getter
 public enum OrderStatusEnum {
@@ -13,9 +12,10 @@ public enum OrderStatusEnum {
     PROCESSING("PROCESSING", "处理中"),
     RISK_REJECT("RISK_REJECT", "风控拦截"), // 异常：风控拒绝
     MATCHING("MATCHING", "撮合中"),
-    FULL_FILLED("FULL_FILLED", "完全成交"), // 正常：完全成交
-    NOT_FILLED("NOT_FILLED", "无对手单未成交"), // 新增：正常未成交（核心）
-    REJECTED("REJECTED", "非法订单"); // 异常：参数/校验错误拒绝
+    NOT_FILLED("NOT_FILLED", "无对手单未成交"), // 4正常：未成交（核心）
+    PART_FILLED("PART_FILLED", "部分成交"), // 5新增：部分成交（核心）
+    FULL_FILLED("FULL_FILLED", "完全成交"), // 6正常：完全成交
+    REJECTED("REJECTED", "非法订单"); // 7异常：参数/校验错误拒绝
 
     private final String code;
     private final String desc;
@@ -26,10 +26,10 @@ public enum OrderStatusEnum {
     }
 
     /**
-     * 判断是否为未完成状态（仅待处理/处理中/撮合中，排除正常未成交）
+     * 判断是否为未完成状态
      */
     public boolean isUnfinished() {
-        return this == PROCESSING || this == MATCHING;
+        return this == PROCESSING || this == MATCHING || this == PART_FILLED;
     }
 
     /**
@@ -37,6 +37,13 @@ public enum OrderStatusEnum {
      */
     public boolean isFailed() {
         return this == RISK_REJECT || this == REJECTED;
+    }
+
+    /**
+     * 扩展：判断是否为成交相关状态（完全/部分成交）
+     */
+    public boolean isFilled() {
+        return this == FULL_FILLED || this == PART_FILLED;
     }
 
     /**

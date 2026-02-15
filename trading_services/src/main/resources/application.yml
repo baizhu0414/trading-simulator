@@ -47,7 +47,7 @@ trading:
 
   recovery:
     enable: true
-    recover-status: NEW,PROCESSING,MATCHING,NOT_FILLED # 应用崩溃或其他情况，重启加载未完成订单。
+    recover-status: NEW,PROCESSING,MATCHING,NOT_FILLED,PART_FILLED # 应用崩溃或其他情况，重启加载未完成订单。
     batch-size: 100
 
 # 监控配置

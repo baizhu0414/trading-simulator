@@ -17,6 +17,7 @@ public enum ErrorCodeEnum {
     RISK_REJECT(3007, "风控拦截"),
     MATCH_FAILED(3008, "撮合失败"),
     SELF_TRADE(3011, "对敲风险"),
+    ORDER_EXISTED(3012, "订单号已存在"),
 
     // 新增：数据库相关错误码（精准区分）
     DB_FIELD_LENGTH_EXCEED(4001, "数据库字段长度超限"),
