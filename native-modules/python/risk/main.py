@@ -1,3 +1,4 @@
+import socket
 import logging
 import sys
 import json
@@ -45,21 +46,25 @@ def start_server():
                                 # 2. Risk Check
                                 result = risk_manager.check(message)
                                 
-                                # 3. Construct Response
+                                # 3. Construct Response based on protocol/ipc/risk_check_response.schema.json
                                 if result["passed"]:
-                                    response_data = {"status": "RISK_PASSED", "message": result["message"]}
+                                    # allow: true, reason: null or empty
+                                    response_data = {"allow": True, "reason": ""}
                                 else:
-                                    response_data = {"status": "RISK_REJECTED", "message": result["message"]}
+                                    # allow: false, reason: "同一股东号存在对敲交易" (Matching ErrorCodeEnum.SELF_TRADE)
+                                    response_data = {"allow": False, "reason": "同一股东号存在对敲交易"}
                                 
                                 response = json.dumps(response_data).encode('utf-8')
                                 conn.sendall(response)
                                 
                             except json.JSONDecodeError:
                                 logger.error("Invalid JSON format")
-                                conn.sendall(b'{"status": "ERROR", "message": "Invalid JSON"}')
+                                # Return a safe deny with reason
+                                conn.sendall(b'{"allow": false, "reason": "Invalid JSON format"}')
                             except Exception as e:
                                 logger.error(f"Error processing request: {e}")
-                                conn.sendall(f'{{"status": "ERROR", "message": "{str(e)}"}}'.encode('utf-8'))
+                                error_msg = f"Internal Error: {str(e)}"
+                                conn.sendall(json.dumps({"allow": False, "reason": error_msg}).encode('utf-8'))
                     except Exception as e:
                         logger.error(f"Error handling connection: {e}")
                     finally:
