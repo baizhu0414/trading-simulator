@@ -8,14 +8,13 @@ import lombok.Getter;
  */
 @Getter
 public enum OrderStatusEnum {
-    NEW("NEW", "新建订单"),
     PROCESSING("PROCESSING", "处理中"),
-    RISK_REJECT("RISK_REJECT", "风控拦截"), // 异常：风控拒绝
+    RISK_REJECT("RISK_REJECT", "风控拦截"), // status=1异常：风控拒绝
     MATCHING("MATCHING", "撮合中"),
-    NOT_FILLED("NOT_FILLED", "无对手单未成交"), // 4正常：未成交（核心）
-    PART_FILLED("PART_FILLED", "部分成交"), // 5新增：部分成交（核心）
-    FULL_FILLED("FULL_FILLED", "完全成交"), // 6正常：完全成交
-    REJECTED("REJECTED", "非法订单"); // 7异常：参数/校验错误拒绝
+    NOT_FILLED("NOT_FILLED", "无对手单未成交"), // 3正常：未成交（核心）
+    PART_FILLED("PART_FILLED", "部分成交"), // 4新增：部分成交（核心）
+    FULL_FILLED("FULL_FILLED", "完全成交"), // 5正常：完全成交
+    REJECTED("REJECTED", "非法订单"); // 6异常：参数/校验错误拒绝
 
     private final String code;
     private final String desc;

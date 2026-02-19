@@ -19,8 +19,6 @@ import java.time.LocalDateTime;
 @NoArgsConstructor
 @AllArgsConstructor
 public class Order implements Serializable {
-    private static final long serialVersionUID = 1L;
-
     /** 数据库自增主键 */
     private Long id;
     /** 订单唯一编号（业务唯一标识，固定16位） */

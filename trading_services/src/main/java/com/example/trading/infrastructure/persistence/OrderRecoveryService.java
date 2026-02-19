@@ -1,12 +1,12 @@
 package com.example.trading.infrastructure.persistence;
 
 import com.example.trading.application.ExchangeService;
+import com.example.trading.application.response.BaseResponse;
 import com.example.trading.common.enums.OrderStatusEnum;
 import com.example.trading.domain.engine.MatchingEngine;
 import com.example.trading.domain.engine.OrderBook;
 import com.example.trading.domain.model.Order;
 import com.example.trading.mapper.OrderMapper;
-import com.example.trading.util.JsonUtils;
 import com.github.pagehelper.PageHelper;
 import com.github.pagehelper.PageInfo;
 import jakarta.annotation.Resource;
@@ -35,7 +35,7 @@ public class OrderRecoveryService implements CommandLineRunner {
     private final OrderBook orderBook;
     private final MatchingEngine matchingEngine; // 新增：注入撮合引擎,新增恢复后主动撮合逻辑
 
-    // 注入ExchangeService，用于重新处理NEW/PROCESSING订单
+    // 注入ExchangeService，用于重新处理MATCHING/PROCESSING订单
     private final ExchangeService exchangeService;
 
     @Value("${trading.recovery.enable:true}")
@@ -63,8 +63,6 @@ public class OrderRecoveryService implements CommandLineRunner {
         int totalRecovered = 0;
         int totalSkipped = 0;
         int totalFailed = 0;
-        // 新增：记录恢复的股票代码，用于后续按股票撮合
-        Set<String> recoveredSecurityIds = new HashSet<>();
 
         try {
             // 解析恢复状态
@@ -107,33 +105,12 @@ public class OrderRecoveryService implements CommandLineRunner {
                 totalSkipped += batchResult.getSkipCount();
                 totalFailed += batchResult.getFailCount();
 
-                // 新增：记录恢复的股票代码
-                batchOrders.stream()
-                        .map(Order::getSecurityId)
-                        .filter(Objects::nonNull)
-                        .forEach(recoveredSecurityIds::add);
-
                 pageNum++;
             } while (pageNum <= totalPages);
 
             log.info("【订单恢复】完成，总计待恢复{}笔，成功{}笔，跳过{}笔，失败{}笔",
                     totalRecovered + totalSkipped + totalFailed,
                     totalRecovered, totalSkipped, totalFailed);
-
-            // ========== 核心新增：恢复完成后，主动触发存量订单撮合 ==========
-            if (!recoveredSecurityIds.isEmpty()) {
-                log.info("开始对恢复的股票执行主动撮合，涉及股票：{}", String.join(",", recoveredSecurityIds));
-                for (String securityId : recoveredSecurityIds) {
-                    try {
-                        matchingEngine.matchOrderBookOrders(securityId);
-                    } catch (Exception e) {
-                        log.error("主动撮合股票[{}]的存量订单失败", securityId, e);
-                    }
-                }
-                log.info("所有恢复股票的主动撮合流程完成");
-            } else {
-                log.info("无恢复的股票，跳过主动撮合");
-            }
 
         } catch (Exception e) {
             log.error("【订单恢复】全局异常", e);
@@ -163,6 +140,9 @@ public class OrderRecoveryService implements CommandLineRunner {
                 .collect(Collectors.toList());
     }
 
+    /**
+     * 数据恢复,并对部分订单进行撮合流程。
+     */
     public BatchResult processBatchOrders(List<Order> batchOrders) {
         int successCount = 0;
         int failCount = 0;
@@ -199,17 +179,17 @@ public class OrderRecoveryService implements CommandLineRunner {
                 if (order.getStatus() == OrderStatusEnum.MATCHING || order.getStatus() == OrderStatusEnum.PART_FILLED) {
                     // 撮合中：加入OrderBook + 重置为NOT_FILLED（终态，避免状态残留）
                     order.setStatus(OrderStatusEnum.NOT_FILLED);
-                    orderMapper.updateById(order);
-                    orderBook.addOrder(order);
-                    log.info("【订单恢复】订单[{}]（撮合中）重置为未成交并加入订单簿", order.getClOrderId());
-                    successCount++;
-                } else if (order.getStatus() == OrderStatusEnum.NEW || order.getStatus() == OrderStatusEnum.PROCESSING) {
-                    // NEW/PROCESSING：重新走完整流程（校验/风控/撮合）
-                    // 步骤1：标记为REJECTED（避免幂等校验拦截）
-                    order.setStatus(OrderStatusEnum.REJECTED);
-                    orderMapper.updateById(order);
-                    // 步骤2：调用ExchangeService重新处理
-                    String result = exchangeService.processOrder(JsonUtils.toJson(order));
+                    int updateCount = orderMapper.updateById(order);
+                    if (updateCount > 0) {
+                        order.setVersion(order.getVersion()+1);
+                        orderBook.addOrder(order);
+                        log.info("【订单恢复】订单[{}]（撮合中）重置为未成交并加入订单簿", order.getClOrderId());
+                        successCount++;
+                    }
+                } else if (order.getStatus() == OrderStatusEnum.PROCESSING) {
+                    // PROCESSING：重新走完整流程（校验/风控/撮合）
+                    // 调用ExchangeService重新撮合处理，内部会调用 matchingEngine.match
+                    BaseResponse result = exchangeService.recoverOrder(order);
                     log.info("【订单恢复】订单[{}]（{}）重新处理完成，结果：{}",
                             order.getClOrderId(), order.getStatus().getDesc(), result);
                     successCount++;

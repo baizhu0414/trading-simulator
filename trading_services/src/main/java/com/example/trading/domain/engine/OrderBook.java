@@ -195,6 +195,52 @@ public class OrderBook {
     }
 
     /**
+     * 判断订单是否存在于订单簿中
+     * @param order 待检查的订单
+     * @return true=存在，false=不存在/参数非法
+     */
+    public boolean containsOrder(Order order) {
+        // 1. 基础参数校验（与add/remove逻辑保持一致）
+        if (order == null || order.getSecurityId() == null || order.getSide() == null || order.getPrice() == null || order.getClOrderId() == null) {
+            log.error("订单参数非法，无法检查是否存在于订单簿：{}", order);
+            return false;
+        }
+
+        String securityId = order.getSecurityId();
+        SideEnum side = order.getSide();
+        BigDecimal price = order.getPrice();
+        String clOrderId = order.getClOrderId();
+
+        // 2. 校验订单簿是否初始化该股票
+        if (!orderBookMap.containsKey(securityId)) {
+            log.warn("股票[{}]的订单簿未初始化，订单[{}]不存在", securityId, clOrderId);
+            return false;
+        }
+
+        // 3. 获取该方向的价格Map和对应价格的订单队列
+        ConcurrentSkipListMap<BigDecimal, Queue<Order>> priceMap = orderBookMap.get(securityId).get(side);
+        Queue<Order> orderQueue = priceMap.get(price);
+
+        // 4. 队列不存在/为空 → 订单不存在
+        if (orderQueue == null || orderQueue.isEmpty()) {
+            log.info("订单[{}]对应的价格[{}]队列不存在/为空，判定不存在于订单簿", clOrderId, price);
+            return false;
+        }
+
+        // 5. 遍历队列，通过clOrderId（唯一标识）判断订单是否存在
+        // 注：使用stream+anyMatch，兼顾线程安全和可读性（LinkedBlockingQueue的迭代器是线程安全的）
+        boolean exists = orderQueue.stream()
+                .anyMatch(o -> clOrderId.equals(o.getClOrderId()));
+
+        if (exists) {
+            log.info("订单[{}]存在于[{}]方向订单簿，股票[{}]，价格[{}]", clOrderId, side.getDesc(), securityId, price);
+        } else {
+            log.warn("订单[{}]不存在于[{}]方向订单簿，股票[{}]，价格[{}]", clOrderId, side.getDesc(), securityId, price);
+        }
+        return exists;
+    }
+
+    /**
      * 清空指定股票的订单簿
      */
     public void clearOrderBook(String securityId) {

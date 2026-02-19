@@ -41,6 +41,11 @@ public interface OrderMapper {
     int updateById(Order order);
 
     /**
+     * 对手订单可能有多个，批量更新
+     */
+    int batchUpdateById(@Param("orders") List<Order> orders);
+
+    /**
      * 判断订单是否存在（幂等校验快速判断）
      */
     boolean existsByClOrderId(@Param("clOrderId") String clOrderId);

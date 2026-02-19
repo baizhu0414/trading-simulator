@@ -1,6 +1,7 @@
 package com.example.trading.controller;
 
 import com.example.trading.application.ExchangeService;
+import com.example.trading.application.response.BaseResponse;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -20,7 +21,7 @@ public class TradingController {
      * 接收订单JSON，返回回报JSON
      */
     @PostMapping("/order")
-    public String processOrder(@RequestBody String orderJson) {
+    public BaseResponse processOrder(@RequestBody String orderJson) {
         return exchangeService.processOrder(orderJson);
     }
 }

@@ -16,6 +16,7 @@ public enum ErrorCodeEnum {
     PRICE_INVALID(3006, "订单价格非法"),
     RISK_REJECT(3007, "风控拦截"),
     MATCH_FAILED(3008, "撮合失败"),
+    QTY_NOT_MULTIPLE_100(3009, "订单数量非法（必须是100的整数倍）"),
     SELF_TRADE(3011, "对敲风险"),
     ORDER_EXISTED(3012, "订单号已存在"),
 
@@ -26,11 +27,11 @@ public enum ErrorCodeEnum {
     DB_INSERT_FAILED(4004, "数据库插入失败（未知原因）");
 
     private final Integer code;
-    private final String msg;
+    private final String desc;
 
-    ErrorCodeEnum(Integer code, String msg) {
+    ErrorCodeEnum(Integer code, String desc) {
         this.code = code;
-        this.msg = msg;
+        this.desc = desc;
     }
 
     // 新增：根据异常信息匹配错误码（核心解析逻辑）
