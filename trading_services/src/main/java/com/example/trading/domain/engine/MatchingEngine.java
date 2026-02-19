@@ -265,7 +265,7 @@ public class MatchingEngine {
             buyOrder.setQty(buyOrder.getQty() - tradeQty);
             sellOrder.setQty(sellOrder.getQty() - tradeQty);
 
-            // 更新订单状态
+            // 更新订单状态,移除orderBook队列
             if (buyOrder.getQty() == 0) {
                 buyOrder.setStatus(OrderStatusEnum.FULL_FILLED);
                 buyQueue.poll();

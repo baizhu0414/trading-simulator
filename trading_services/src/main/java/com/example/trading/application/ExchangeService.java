@@ -39,7 +39,6 @@ public class ExchangeService {
     private final SelfTradeChecker selfTradeChecker;
     private final OrderMapper orderMapper;
     private final MeterRegistry meterRegistry;
-    private final TradePersistenceService tradePersistenceService;
     private final TradeResponseHelper tradeResponseHelper;
 
     // 监控指标
@@ -68,11 +67,6 @@ public class ExchangeService {
             // 1. JSON解析
             order = JsonUtils.fromJson(orderJson, Order.class);
             order.setOriginalQty(order.getQty()); // 设定股数初始值
-            if (order == null) {
-                log.error("订单JSON解析失败，内容：{}", orderJson);
-                orderFailedCounter.increment();
-                return buildRejectResponse(null, ErrorCodeEnum.PARAM_FAILED);
-            }
             // 补充默认值
             if (order.getCreateTime() == null) {
                 order.setCreateTime(LocalDateTime.now());
@@ -113,103 +107,37 @@ public class ExchangeService {
     }
 
     /**
-     * 免幂等校验（主动撮合专用，不允许请求流程中手动调用！！）
-     *
-     * @param order 数据库中获取的订单，此时假设订单数据结构已经完全符合要求
-     * @return 功能和返回值同 processOrder
-     */
-    public BaseResponse recoverOrder(Order order) {
-        String clOrderId = order.getClOrderId();
-        try {
-            // 补充默认值（与 processOrder 一致）
-            if (order.getCreateTime() == null) order.setCreateTime(LocalDateTime.now());
-            if (order.getVersion() == null) order.setVersion(0);
-            if (order.getOriginalQty() == null) order.setOriginalQty(order.getQty());
-
-            orderTotalCounter.increment();
-            // 直接进入事务处理（跳过幂等校验！）
-            return processOrderInTransaction(order);
-
-        } catch (Exception e) {
-            log.error("恢复订单[{}]失败", clOrderId, e);
-            orderFailedCounter.increment();
-            return buildRejectResponse(order, ErrorCodeEnum.matchDbError(e));
-        }
-    }
-
-    /**
      * 事务内处理订单
      */
     @Transactional(rollbackFor = Exception.class) // 新增：事务注解，保障订单&成交记录DB更新原子性
     public BaseResponse processOrderInTransaction(Order order) {
         String clOrderId = order.getClOrderId();
         try {
-            // 基础校验+风控校验
+            // 1. 基础校验
             order.setStatus(OrderStatusEnum.PROCESSING);
             List<ErrorCodeEnum> validateErrors = orderValidator.validate(order);
             if (!validateErrors.isEmpty()) {
                 order.setStatus(OrderStatusEnum.REJECTED);
                 log.error("校验出错");
-                return rejectOrder(order, validateErrors.get(0));
+                return rejectOrderPreInsert(order, validateErrors.get(0));
             }
-            int insertCount = orderMapper.insert(order);
-            if (insertCount > 0) {
-                order.setVersion(order.getVersion()+1);
-            }
+
+            // 2.风控检查提前到 Insert 之前（不符合的直接不允许入库了，并且也不放进selfCheck缓存中了）
             ErrorCodeEnum riskError = selfTradeChecker.check(order);
             if (riskError != null) {
-                return rejectOrder(order, riskError);
-            }
-/*
-            // 撮合（获取包含多笔匹配订单的MatchingResult）
-            order.setStatus(OrderStatusEnum.MATCHING);
-            MatchingResult matchingResult = matchingEngine.match(order);
-            Order matchedOrder = matchingResult.getMatchedOrder();
-            List<MatchingResult.MatchCounterDetail> matchDetails = matchingResult.getMatchDetails();
-            // ========== 核心修复：兜底确认订单状态 ==========
-            if (matchDetails.isEmpty()) {
-                // 无任何匹配：确保状态为 NOT_FILLED
-                matchedOrder.setStatus(OrderStatusEnum.NOT_FILLED);
+                // 风控拦截，此时还未入库，直接返回拒绝
+                log.warn("订单[{}]风控拦截，不执行入库", clOrderId);
+                order.setStatus(riskError == ErrorCodeEnum.SELF_TRADE ? OrderStatusEnum.RISK_REJECT : OrderStatusEnum.REJECTED);
+                return rejectOrderPreInsert(order, riskError);
             }
 
-            // 批量构建待更新订单
-            List<Order> allOrdersToUpdate = new ArrayList<>();
-            allOrdersToUpdate.add(matchedOrder);
-            // 批量构建成交记录
-            List<Trade> trades = new ArrayList<>();
-            List<OrderStatusEnum> counterStatus = new ArrayList<>();
-            for (MatchingResult.MatchCounterDetail detail : matchDetails) {
-                Order counterOrder = detail.getCounterPartyOrder();
-                allOrdersToUpdate.add(counterOrder);
+            // 3. 风控通过，正式插入数据库
+            int insertCount = orderMapper.insert(order);
 
-                Trade trade = buildTrade(matchedOrder, detail.getCounterPartyOrder(), detail.getExecQty(), detail.getExecPrice());
-                trades.add(trade);
-
-                counterStatus.add(counterOrder.getStatus());
+            // 4.单真正落库后，再补填风控缓存
+            if (insertCount > 0) {
+                selfTradeChecker.putCache(order);
             }
-
-            // 批量插入成交记录
-            if (!trades.isEmpty()) {
-                tradeMapper.batchInsert(trades);
-                log.info("订单[{}]批量插入{}笔成交记录", clOrderId, trades.size());
-            }
-
-            // 批量更新订单（当前订单+所有对手方订单）
-            orderMapper.batchUpdateById(allOrdersToUpdate);
-            log.info("订单[{}]批量更新{}笔订单", clOrderId, allOrdersToUpdate.size());
-
-            // 清理风控缓存（完全成交的订单）
-            for (Order o : allOrdersToUpdate) {
-                if (o.getStatus() == OrderStatusEnum.FULL_FILLED) {
-                    selfTradeChecker.removeCache(o.getShareholderId(), o.getSecurityId());
-                }
-                o.setVersion(o.getVersion() + 1); // 更新同步乐观锁版本号
-            }
-
-            // 构建返回结果
-            return buildTradeResponse(matchedOrder, trades, counterStatus);
-
- */
 
             return tradeResponseHelper.executeOrderTransaction(order);
         } catch (Exception e) {
@@ -219,15 +147,14 @@ public class ExchangeService {
         }
     }
 
-    // 辅助：拒绝订单并更新状态
-    private BaseResponse rejectOrder(Order order, ErrorCodeEnum error) {
-        order.setStatus(error == ErrorCodeEnum.SELF_TRADE ? OrderStatusEnum.RISK_REJECT : OrderStatusEnum.REJECTED);
-        int count = orderMapper.updateById(order);
-        if (count> 0) {
-            order.setVersion(order.getVersion()+1);
-        }
+    /**
+     * 辅助：拒绝订单（未入库场景，仅返回响应，不操作数据库）
+     * 新增：用于 Insert 之前的拦截（基础校验/风控）
+     */
+    private BaseResponse rejectOrderPreInsert(Order order, ErrorCodeEnum error) {
+        // 注意：这里不调用 orderMapper.updateById
         orderRejectCounter.increment();
-        log.warn("订单[{}]拒绝：{}", order.getClOrderId(), error.getDesc());
+        log.warn("订单[{}]拒绝（未入库）：{}", order.getClOrderId(), error.getDesc());
         return buildRejectResponse(order, error);
     }
 

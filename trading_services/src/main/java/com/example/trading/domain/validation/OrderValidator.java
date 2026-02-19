@@ -66,6 +66,8 @@ public class OrderValidator {
             if (SideEnum.getByCode(order.getSide().getCode()) == null) {
                 errors.add(ErrorCodeEnum.SIDE_INVALID);
             }
+        } else {
+            errors.add(ErrorCodeEnum.PARAM_NULL);
         }
 
         // 4. 数量合法性（整合零股校验逻辑）
@@ -89,10 +91,10 @@ public class OrderValidator {
 
         // 6. 字段长度校验
         if (order.getClOrderId() != null && order.getClOrderId().length() != 16) {
-            errors.add(ErrorCodeEnum.PARAM_FAILED);
+            errors.add(ErrorCodeEnum.PARAM_FORMAT_ERROR);
         }
         if (order.getShareholderId() != null && order.getShareholderId().length() != 10) {
-            errors.add(ErrorCodeEnum.PARAM_FAILED);
+            errors.add(ErrorCodeEnum.PARAM_FORMAT_ERROR);
         }
 
         log.info("订单{}基础校验完成，错误数：{}", order.getClOrderId(), errors.size());

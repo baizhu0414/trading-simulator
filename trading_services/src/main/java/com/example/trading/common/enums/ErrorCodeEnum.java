@@ -8,7 +8,6 @@ import lombok.Getter;
 @Getter
 public enum ErrorCodeEnum {
     PARAM_NULL(3000, "参数为空"),
-    PARAM_FAILED(3001, "参数解析失败"),
     PARAM_FORMAT_ERROR(3002, "参数格式错误"),
     MARKET_INVALID(3003, "交易市场非法"),
     SIDE_INVALID(3004, "买卖方向非法"),
