@@ -12,6 +12,8 @@
         <result column="security_id" property="securityId"/>
         <!-- 直接指定自定义TypeHandler路径，无需根节点声明 -->
         <result column="side" property="side" typeHandler="com.example.trading.common.typehandler.SideEnumTypeHandler"/>
+        <!-- 新增 -->
+        <result column="original_qty" property="originalQty"/>
         <result column="qty" property="qty"/>
         <result column="price" property="price"/>
         <!--（从 0 开始）数OrderStatusEnum的枚举项-->
@@ -23,14 +25,19 @@
     <!-- 插入订单（返回自增主键） -->
     <insert id="insert" parameterType="com.example.trading.domain.model.Order" useGeneratedKeys="true" keyProperty="id">
         INSERT INTO t_exchange_order (
-            cl_order_id, shareholder_id, market, security_id,
-            side, qty, price, status, create_time, version
+        cl_order_id, shareholder_id, market, security_id,
+        side, original_qty, qty, price, status, create_time, version
         ) VALUES (
-                     #{clOrderId}, #{shareholderId}, #{market}, #{securityId},
-                     #{side,typeHandler=com.example.trading.common.typehandler.SideEnumTypeHandler},
-                     #{qty}, #{price}, #{status,typeHandler=org.apache.ibatis.type.EnumOrdinalTypeHandler},
-                     #{createTime}, #{version}
-                 )
+        #{clOrderId}, #{shareholderId}, #{market}, #{securityId},
+        #{side,typeHandler=com.example.trading.common.typehandler.SideEnumTypeHandler},
+        #{originalQty}, #{qty}, #{price},
+        #{status,typeHandler=org.apache.ibatis.type.EnumOrdinalTypeHandler},
+        #{createTime}, #{version}
+        )
+        ON DUPLICATE KEY UPDATE
+        qty = VALUES(qty),          <!-- 更新剩余数量 -->
+        status = VALUES(status),    <!-- 更新订单状态 -->
+        version = version + 1       <!-- 乐观锁版本号自增 -->
     </insert>
 
     <!-- 根据业务单号查询订单 -->
@@ -51,7 +58,7 @@
     <!-- 替换原有selectByStatusIn，增加24小时超时过滤 -->
     <select id="selectByStatusInAndCreateTimeAfter" parameterType="map" resultMap="OrderResultMap">
         SELECT id, cl_order_id, shareholder_id, market, security_id,
-        side, qty, price, status, create_time, version
+        side, original_qty, qty, price, status, create_time, version
         FROM t_exchange_order
         WHERE status IN
         <foreach collection="statusList" item="status" open="(" separator="," close=")">
@@ -65,17 +72,35 @@
     <update id="updateById" parameterType="com.example.trading.domain.model.Order">
         UPDATE t_exchange_order
         SET
-            cl_order_id = #{clOrderId},
-            shareholder_id = #{shareholderId},
-            market = #{market},
-            security_id = #{securityId},
-            side = #{side,typeHandler=com.example.trading.common.typehandler.SideEnumTypeHandler},
-            qty = #{qty},
-            price = #{price},
+            qty = #{qty}, -- 剩余数量
             status = #{status,typeHandler=org.apache.ibatis.type.EnumOrdinalTypeHandler},
-            create_time = #{createTime},
             version = version + 1 -- 版本号自增
         WHERE id = #{id} AND version = #{version} -- 乐观锁条件
+    </update>
+
+    <!-- 批量更新订单（单语句实现，兼容所有 MySQL 配置） -->
+    <update id="batchUpdateById" parameterType="java.util.List">
+        UPDATE t_exchange_order
+        SET
+        qty = CASE id
+        <foreach collection="orders" item="order" separator="">
+            WHEN #{order.id} THEN #{order.qty}
+        </foreach>
+        END,
+        status = CASE id
+        <foreach collection="orders" item="order" separator="">
+            WHEN #{order.id} THEN #{order.status,typeHandler=org.apache.ibatis.type.EnumOrdinalTypeHandler}
+        </foreach>
+        END,
+        version = version + 1
+        WHERE id IN
+        <foreach collection="orders" item="order" open="(" separator="," close=")">
+            #{order.id}
+        </foreach>
+        AND version IN
+        <foreach collection="orders" item="order" open="(" separator="," close=")">
+            #{order.version}
+        </foreach>
     </update>
 
     <!-- 判断订单是否存在 -->

@@ -22,31 +22,36 @@ public class SelfTradeChecker {
     private final Map<String, SideEnum> selfTradeCache = new ConcurrentHashMap<>();
 
     /**
-     * 检查是否存在对敲交易
-     * @return 错误码（null则通过）
+     * 仅检查是否存在对敲，不修改缓存
      */
     public ErrorCodeEnum check(Order order) {
-        String cacheKey = order.getShareholderId() + "_" + order.getSecurityId();
+        String cacheKey = buildKey(order);
         SideEnum existSide = selfTradeCache.get(cacheKey);
 
-        // 1. 缓存中无该股东号-股票的订单，存入缓存
         if (existSide == null) {
-            selfTradeCache.put(cacheKey, order.getSide());
-            log.info("订单{}风控检查通过，无对敲风险", order.getClOrderId());
+            // 缓存中无，检查通过，但此时不写入
+            log.info("订单{}风控检查通过（预检查），无对敲风险", order.getClOrderId());
             return null;
         }
 
-        // 2. 缓存中有相反方向订单，判定为对敲
         if (!existSide.equals(order.getSide())) {
             log.warn("订单{}触发对敲风控：股东号{}，股票{}，存在相反方向订单",
                     order.getClOrderId(), order.getShareholderId(), order.getSecurityId());
             return ErrorCodeEnum.SELF_TRADE;
         }
 
-        // 3. 同方向订单，更新缓存（不影响）
-        selfTradeCache.put(cacheKey, order.getSide());
-        log.info("订单{}风控检查通过，同方向订单", order.getClOrderId());
+        // 同方向，检查通过
+        log.info("订单{}风控检查通过（预检查），同方向订单", order.getClOrderId());
         return null;
+    }
+
+    /**
+     * 订单确认生效后，主动写入/更新缓存
+     */
+    public void putCache(Order order) {
+        String cacheKey = buildKey(order);
+        selfTradeCache.put(cacheKey, order.getSide());
+        log.info("订单{}已记入风控缓存", order.getClOrderId());
     }
 
     /**
@@ -56,5 +61,9 @@ public class SelfTradeChecker {
         String cacheKey = shareholderId + "_" + securityId;
         selfTradeCache.remove(cacheKey);
         log.info("移除风控缓存：{}", cacheKey);
+    }
+
+    private String buildKey(Order order) {
+        return order.getShareholderId() + "_" + order.getSecurityId();
     }
 }

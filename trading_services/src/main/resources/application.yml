@@ -42,13 +42,12 @@ trading:
   # 撮合配置
   matching:
     price-strategy: MID_PRICE # 可选值：MID_PRICE（中间价）、BUY_PRICE（买方价）、SELL_PRICE（卖方价）
-    zero-share:
-      enable: true # 是否支持零股成交
+    zero-share-enable: false # 是否支持零股成交
 
   recovery:
     enable: true
-    recover-status: NEW,PROCESSING,MATCHING,NOT_FILLED # 应用崩溃或其他情况，重启加载未完成订单。
-    batch-size: 100
+    recover-status: PROCESSING,MATCHING,NOT_FILLED,PART_FILLED # 应用崩溃或其他情况，重启加载未完成订单。
+    batch-size: 100 # 一页加载的订单数
 
 # 监控配置
 management:
