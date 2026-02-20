@@ -58,7 +58,7 @@ management:
       base-path: /actuator  # Actuator 默认基础路径，在prometheus.yml中使用
   metrics:
     tags:
-      application: trading-system  # 标记应用名称（便于多实例监控）
+      application: ${spring.application.name} # 给所有指标添加应用名标签，方便Prometheus筛选
   endpoint:
     health:
       show-details: always  # 显示健康详情

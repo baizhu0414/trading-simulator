@@ -1,4 +1,4 @@
-# trading-simulator
+# trading-simulator(待完善)
 ## 项目目标
 基于SpringBoot实现证券交易撮合模拟系统，核心完成「订单校验→对敲风控→撮合匹配→交易回报」全链路，支持行情、撤单、数据分析等可插拔增强模块。
 

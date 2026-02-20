@@ -3,7 +3,7 @@
     <!-- 定义日志输出格式 -->
     <property name="LOG_PATTERN" value="%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{50} - %msg%n"/>
     <!-- 定义日志文件存储路径（默认项目根目录下logs文件夹） -->
-    <property name="LOG_PATH" value="./logs/trading-simulator"/>
+    <property name="LOG_PATH" value="./logs"/>
 
     <!-- 控制台输出 -->
     <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">

@@ -1,4 +1,4 @@
-> - JAVA端新增测试样例，需要对应module的同学审核一下字段是否正确，并参考着进行测试： `trading-simulator\trading_services\src\main\resources\data\Order订单测试样例.md`
+> - JAVA端新增测试样例，需要对应module的同学审核一下字段是否正确，并参考着进行测试： `trading-simulator\trading_services\docs\TestCase-系统核心功能测试案例.md`
 > - C++
 > - Python
 
@@ -36,7 +36,12 @@
     > .\mysqld_exporter.exe --config.my-cnf=.my.cnf
   -  导入SpringBoot 官方大盘 ID：12856(JVM)、7362（MySQL）
   -  给出一个一键启动的 .bat 脚本，双击就能跑（Windows平台）
-  -  自定义表盘(TODO)
+  -  自定义表盘（包括：JVM/MySQL/订单数量和成交状态等）
+
+        <div style="display:flex; gap:10px;">
+        <img src="./trading_services/docs/09-自定义指标监控.png" width="48%" />
+        <img src="./trading_services/docs/09-2自定义表盘展示.png" width="48%" />
+        </div>
 
 ## 1.2 C++（开发者补充）
 
