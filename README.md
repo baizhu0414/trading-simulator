@@ -38,4 +38,4 @@ trading-simulator/
 
         tests *功能测试*
 
-        third_party *外部依赖库，比如解析存储json的库*
+        third_party *外部依赖库，比如解析存储json的库，现在已经废弃，第三方库由vcpkg管理，可在build文件夹中查找一个include子文件夹，由其实现*

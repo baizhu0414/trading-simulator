@@ -9,20 +9,32 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 # 自动处理 vcpkg 依赖
 # 注意：使用 Manifest 模式时，find_package 会自动找到 vcpkg 安装的库
 
-find_package(nlohmann_json CONFIG REQUIRED)
+# 调试信息
+message(STATUS "CMAKE_TOOLCHAIN_FILE: ${CMAKE_TOOLCHAIN_FILE}")
+message(STATUS "VCPKG_INSTALLED_DIR: ${VCPKG_INSTALLED_DIR}")
+message(STATUS "CMAKE_PREFIX_PATH: ${CMAKE_PREFIX_PATH}")
+
+# 方法1：首先尝试不使用CONFIG模式
+# 这会先让CMake自动查找，如果失败再尝试其他方法
+# 注意：vcpkg manifest模式可能需要特殊处理
+# 首先尝试不使用CONFIG模式
+find_package(nlohmann_json REQUIRED)
 find_package(spdlog CONFIG REQUIRED)
 find_package(GTest CONFIG REQUIRED)
 # 使用libmysql（MySQL C客户端库）
-# 在vcpkg中，libmysql通过CONFIG模式提供
-find_package(libmysql CONFIG REQUIRED)
+# 根据vcpkg文档，应该使用unofficial::libmysql::libmysql
+find_package(unofficial-libmysql REQUIRED)
 
 # 包含头文件目录
 include_directories(include)
 
 # 1. 核心库 (Core Library) - 将逻辑与 main 分离，方便测试
 add_library(matcher_core
-    src/core/OrderBook.cpp
+    # src/core/OrderBook.cpp (文件不存在，暂时注释)
     # src/core/MatchingEngine.cpp (后续添加)
+    src/ipc/StdioIPCServer.cpp
+    src/persistence/MySQLPersistence.cpp
+    src/persistence/ProxyPersistence.cpp
 )
 # 指定头文件搜索路径
 target_include_directories(matcher_core PUBLIC include)
@@ -30,14 +42,14 @@ target_include_directories(matcher_core PUBLIC include)
 target_link_libraries(matcher_core PRIVATE 
     nlohmann_json::nlohmann_json 
     spdlog::spdlog 
-    libmysql::mysqlclient # vcpkg 中 libmysql 暴露的 target
+    unofficial::libmysql::libmysql # vcpkg 中 libmysql 暴露的 target
 )
 # 2. 可执行文件 (Executable)
 add_executable(matcher_server src/main.cpp)
 target_link_libraries(matcher_server PRIVATE matcher_core)
 
-# 3. 测试 (Tests)
-enable_testing()
-add_executable(unit_tests tests/test_main.cpp)
-target_link_libraries(unit_tests PRIVATE matcher_core GTest::gtest_main)
-add_test(NAME CoreTests COMMAND unit_tests)
+# 3. 测试 (Tests) - 暂时禁用，因为测试文件不存在
+# enable_testing()
+# add_executable(unit_tests tests/test_main.cpp)
+# target_link_libraries(unit_tests PRIVATE matcher_core GTest::gtest_main)
+# add_test(NAME CoreTests COMMAND unit_tests)

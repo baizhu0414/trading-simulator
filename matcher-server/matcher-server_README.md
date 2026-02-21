@@ -46,7 +46,10 @@ CMake 会自动检测 vcpkg 并安装所有依赖。
 
 **Windows (PowerShell):**
 
-*本部分需要根据开发者的环境调整*
+*本部分需要根据开发者的环境调整，这里建议在mathcer-server文件夹下执行cmake,避免build文件夹出现在根目录*
+
+*VCPKG_INSTALLED_DIR和CMAKE_PREFIX_PATH需要手动正确设置,开发者可能需要手动设置settings.json避免vscode的问题栏中出现的CMakeLists.txt飘红（可正常执行cmake），这里可能是vscode的cmake的配置导致的*
+
 
 \# 假设环境变量 VCPKG\_ROOT 已设置，否则添加: \-DCMAKE\_TOOLCHAIN\_FILE="C:/path/to/vcpkg/scripts/buildsystems/vcpkg.cmake"  
 cmake \-B build \-S . \-DCMAKE\_TOOLCHAIN\_FILE="$env:VCPKG\_ROOT/scripts/buildsystems/vcpkg.cmake"
