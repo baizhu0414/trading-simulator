@@ -122,18 +122,21 @@ void MySQLPersistence::saveTrade(const model::Trade& trade) {
     }
     
     try {
+        // 匹配 Java 端的 t_exchange_trade 表结构
         std::stringstream sql;
-        sql << "INSERT INTO trades (trade_id, cl_order_id_buy, cl_order_id_sell, "
-            << "security_id, price, quantity, timestamp) VALUES ('"
+        sql << "INSERT INTO `t_exchange_trade` (`exec_id`, `buy_cl_order_id`, `sell_cl_order_id`, "
+            << "`security_id`, `exec_price`, `exec_qty`, `trade_time`, `market`, "
+            << "`buy_shareholder_id`, `sell_shareholder_id`) VALUES ('"
             << escapeString(trade.tradeId) << "', '"
             << escapeString(trade.clOrderIdBuy) << "', '"
             << escapeString(trade.clOrderIdSell) << "', '"
             << escapeString(trade.securityId) << "', "
             << trade.price << ", "
             << trade.quantity << ", "
-            << std::chrono::duration_cast<std::chrono::milliseconds>(
-                trade.timestamp.time_since_epoch()).count()
-            << ")";
+            << "NOW(), '"  // trade_time 使用当前时间
+            << escapeString(trade.market) << "', '"
+            << escapeString(trade.buyShareholderId) << "', '"
+            << escapeString(trade.sellShareholderId) << "')";
         
         executeSQL(sql.str());
         
@@ -150,13 +153,12 @@ void MySQLPersistence::updateOrder(const model::Order& order) {
     }
     
     try {
+        // 匹配 Java 端的 t_exchange_order 表结构
         std::stringstream sql;
-        sql << "UPDATE orders SET status = '" << escapeString(order.status) 
-            << "', executed_quantity = " << order.executedQuantity
-            << ", last_executed_price = " << order.lastExecutedPrice
-            << ", last_updated = " << std::chrono::duration_cast<std::chrono::milliseconds>(
-                std::chrono::system_clock::now().time_since_epoch()).count()
-            << " WHERE cl_order_id = '" << escapeString(order.clOrderId) << "'";
+        sql << "UPDATE `t_exchange_order` SET `status` = '" << escapeString(order.status) 
+            << "', `qty` = " << order.qty
+            << ", `version` = `version` + 1"  // 乐观锁版本号自增
+            << " WHERE `cl_order_id` = '" << escapeString(order.clOrderId) << "'";
         
         executeSQL(sql.str());
         
@@ -175,11 +177,13 @@ std::vector<model::Order> MySQLPersistence::loadUnfinishedOrders(const std::stri
     std::vector<model::Order> orders;
     
     try {
+        // 匹配 Java 端的 t_exchange_order 表结构
         std::stringstream sql;
-        sql << "SELECT cl_order_id, security_id, side, price, quantity, "
-            << "executed_quantity, last_executed_price, status, order_type, "
-            << "time_in_force, timestamp FROM orders WHERE security_id = '" 
-            << escapeString(securityId) << "' AND status IN ('NEW', 'PARTIALLY_FILLED')";
+        sql << "SELECT `cl_order_id`, `shareholder_id`, `market`, `security_id`, `side`, "
+            << "`qty`, `original_qty`, `price`, `status`, `create_time`, `version` "
+            << "FROM `t_exchange_order` WHERE `security_id` = '" 
+            << escapeString(securityId) << "' AND `status` IN ('NEW', 'MATCHING', 'PART_FILLED') "
+            << "ORDER BY `create_time` ASC";
         
         executeSQL(sql.str());
         
@@ -192,21 +196,15 @@ std::vector<model::Order> MySQLPersistence::loadUnfinishedOrders(const std::stri
         while ((row = mysql_fetch_row(result))) {
             model::Order order;
             order.clOrderId = row[0] ? row[0] : "";
-            order.securityId = row[1] ? row[1] : "";
-            order.side = row[2] ? row[2] : "";
-            order.price = row[3] ? std::stod(row[3]) : 0.0;
-            order.quantity = row[4] ? std::stoll(row[4]) : 0;
-            order.executedQuantity = row[5] ? std::stoll(row[5]) : 0;
-            order.lastExecutedPrice = row[6] ? std::stod(row[6]) : 0.0;
-            order.status = row[7] ? row[7] : "";
-            order.orderType = row[8] ? row[8] : "";
-            order.timeInForce = row[9] ? row[9] : "";
-            
-            if (row[10]) {
-                int64_t timestamp_ms = std::stoll(row[10]);
-                order.timestamp = std::chrono::system_clock::time_point(
-                    std::chrono::milliseconds(timestamp_ms));
-            }
+            order.shareholderId = row[1] ? row[1] : "";
+            order.market = row[2] ? row[2] : "";
+            order.securityId = row[3] ? row[3] : "";
+            order.side = row[4] ? row[4] : "";
+            order.qty = row[5] ? std::stoi(row[5]) : 0;
+            order.originalQty = row[6] ? std::stoi(row[6]) : 0;
+            order.price = row[7] ? std::stod(row[7]) : 0.0;
+            order.status = row[8] ? row[8] : "";
+            // create_time (row[9]) 和 version (row[10]) 暂不映射到 Order 结构体
             
             orders.push_back(order);
         }
@@ -285,46 +283,63 @@ void MySQLPersistence::updateOrders(const std::vector<model::Order>& orders) {
 
 void MySQLPersistence::ensureTablesExist() {
     try {
-        // 创建 trades 表
-        std::string createTradesTable = R"(
-            CREATE TABLE IF NOT EXISTS trades (
-                trade_id VARCHAR(64) PRIMARY KEY,
-                cl_order_id_buy VARCHAR(64) NOT NULL,
-                cl_order_id_sell VARCHAR(64) NOT NULL,
-                security_id VARCHAR(20) NOT NULL,
-                price DECIMAL(20, 8) NOT NULL,
-                quantity BIGINT NOT NULL,
-                timestamp BIGINT NOT NULL,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                INDEX idx_security_timestamp (security_id, timestamp)
-            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+        // 创建数据库 (与 Java 端保持一致)
+        std::string createDatabase = R"(
+            CREATE DATABASE IF NOT EXISTS trading_db
+            DEFAULT CHARACTER SET utf8mb4
+            DEFAULT COLLATE utf8mb4_unicode_ci
         )";
         
-        // 创建 orders 表
+        executeSQL(createDatabase);
+        executeSQL("USE trading_db");
+        
+        // 创建订单表 (完全匹配 Java 端的 t_exchange_order)
         std::string createOrdersTable = R"(
-            CREATE TABLE IF NOT EXISTS orders (
-                cl_order_id VARCHAR(64) PRIMARY KEY,
-                security_id VARCHAR(20) NOT NULL,
-                side VARCHAR(10) NOT NULL,
-                price DECIMAL(20, 8) NOT NULL,
-                quantity BIGINT NOT NULL,
-                executed_quantity BIGINT DEFAULT 0,
-                last_executed_price DECIMAL(20, 8),
-                status VARCHAR(20) NOT NULL,
-                order_type VARCHAR(20),
-                time_in_force VARCHAR(20),
-                timestamp BIGINT NOT NULL,
-                last_updated BIGINT NOT NULL,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                INDEX idx_security_status (security_id, status),
-                INDEX idx_timestamp (timestamp)
-            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+            CREATE TABLE IF NOT EXISTS `t_exchange_order` (
+                `id` bigint(20) NOT NULL AUTO_INCREMENT COMMENT '数据库自增主键',
+                `cl_order_id` varchar(16) NOT NULL COMMENT '订单唯一编号',
+                `shareholder_id` varchar(10) NOT NULL COMMENT '股东号',
+                `market` varchar(4) NOT NULL COMMENT '交易市场',
+                `security_id` varchar(6) NOT NULL COMMENT '股票代码',
+                `side` varchar(1) NOT NULL COMMENT '买卖方向',
+                `qty` int UNSIGNED NOT NULL COMMENT '订单数量',
+                `original_qty` int UNSIGNED NOT NULL COMMENT '原始订单数量',
+                `price` decimal(10,2) NOT NULL COMMENT '订单价格',
+                `status` varchar(20) NOT NULL COMMENT '订单状态',
+                `create_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '订单创建时间',
+                `version` int(11) NOT NULL DEFAULT 0 COMMENT '乐观锁版本号',
+                PRIMARY KEY (`id`),
+                UNIQUE KEY `idx_cl_order_id` (`cl_order_id`),
+                KEY `idx_status_create_time` (`status`,`create_time`),
+                KEY `idx_securityid_status` (`security_id`, `status`)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='交易所订单表'
         )";
         
-        executeSQL(createTradesTable);
-        executeSQL(createOrdersTable);
+        // 创建成交表 (完全匹配 Java 端的 t_exchange_trade)
+        std::string createTradesTable = R"(
+            CREATE TABLE IF NOT EXISTS `t_exchange_trade` (
+                `id` bigint(20) NOT NULL AUTO_INCREMENT COMMENT '数据库自增主键',
+                `exec_id` varchar(12) NOT NULL COMMENT '成交唯一编号',
+                `buy_cl_order_id` varchar(16) NOT NULL COMMENT '买方订单唯一编号',
+                `sell_cl_order_id` varchar(16) NOT NULL COMMENT '卖方订单唯一编号',
+                `exec_qty` int UNSIGNED NOT NULL COMMENT '本次成交数量',
+                `exec_price` decimal(10,2) NOT NULL COMMENT '本次成交价格',
+                `trade_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '实际撮合成交时间',
+                `market` VARCHAR(4) NOT NULL COMMENT '交易市场',
+                `security_id` VARCHAR(6) NOT NULL COMMENT '股票代码',
+                `buy_shareholder_id` VARCHAR(10) NOT NULL COMMENT '买方股东号',
+                `sell_shareholder_id` VARCHAR(10) NOT NULL COMMENT '卖方股东号',
+                PRIMARY KEY (`id`),
+                UNIQUE KEY `idx_exec_id` (`exec_id`),
+                KEY `idx_buy_cl_order_id` (`buy_cl_order_id`),
+                KEY `idx_sell_cl_order_id` (`sell_cl_order_id`)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='交易所成交明细表'
+        )";
         
-        std::cout << "[MySQLPersistence] Tables ensured to exist" << std::endl;
+        executeSQL(createOrdersTable);
+        executeSQL(createTradesTable);
+        
+        std::cout << "[MySQLPersistence] Tables ensured to exist (compatible with Java schema)" << std::endl;
     } catch (const std::exception& e) {
         std::cerr << "[MySQLPersistence] Failed to ensure tables exist: " << e.what() << std::endl;
         throw;
