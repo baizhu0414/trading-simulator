@@ -1,5 +1,11 @@
 cmake_minimum_required(VERSION 3.20)
 
+# 自动检测 vcpkg 工具链
+if(NOT DEFINED CMAKE_TOOLCHAIN_FILE AND DEFINED ENV{VCPKG_ROOT})
+    set(CMAKE_TOOLCHAIN_FILE "$ENV{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake"
+        CACHE STRING "Vcpkg toolchain file")
+endif()
+
 project(MatcherServer VERSION 0.1.0 LANGUAGES CXX)
 
 # 设置 C++ 标准 (C++17 是现代金融交易系统的基准)
