@@ -35,7 +35,7 @@ include_directories(include)
 add_library(matcher_core
     # src/core/OrderBook.cpp (文件不存在，暂时注释)
     # src/core/MatchingEngine.cpp (后续添加)
-    src/ipc/StdioIPCServer.cpp
+    src/ipc/HttpIPCServer.cpp
     src/persistence/MySQLPersistence.cpp
     src/persistence/ProxyPersistence.cpp
 )

@@ -4,6 +4,8 @@
 #include <nlohmann/json.hpp>
 #include <iostream>
 #include <chrono>
+#include <sstream>
+#include <vector>
 
 using json = nlohmann::json;
 
@@ -257,6 +259,38 @@ model::Order HttpIPCServer::parseOrder(const nlohmann::json& orderJson) {
     }
     
     return order;
+}
+
+/**
+ * @brief IPC服务器工厂函数实现
+ */
+std::unique_ptr<IPCServer> createIPCServer(const std::string& config) {
+    // 解析配置字符串，格式: "http:port:javaHost:javaPort"
+    // 例如: "http:9001:localhost:8081"
+    
+    if (config.find("http:") == 0) {
+        // 解析 HTTP 配置
+        std::vector<std::string> parts;
+        std::stringstream ss(config);
+        std::string part;
+        
+        while (std::getline(ss, part, ':')) {
+            parts.push_back(part);
+        }
+        
+        int port = 9001;
+        std::string javaHost = "localhost";
+        int javaPort = 8081;
+        
+        if (parts.size() > 1) port = std::stoi(parts[1]);
+        if (parts.size() > 2) javaHost = parts[2];
+        if (parts.size() > 3) javaPort = std::stoi(parts[3]);
+        
+        return std::make_unique<HttpIPCServer>(port, javaHost, javaPort);
+    }
+    
+    // 默认返回 HTTP 服务器
+    return std::make_unique<HttpIPCServer>();
 }
 
 } // namespace ipc
