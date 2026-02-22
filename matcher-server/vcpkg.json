@@ -5,7 +5,8 @@
         "nlohmann-json",
         "spdlog",
         "gtest",
-        "libmysql"
+        "libmysql",
+        "cpp-httplib"
     ],
     "builtin-baseline": "05442024c3fda64320bd25d2251cc9807b84fb6f"
 }

@@ -25,6 +25,9 @@ find_package(GTest CONFIG REQUIRED)
 # 根据vcpkg文档，应该使用unofficial::libmysql::libmysql
 find_package(unofficial-libmysql REQUIRED)
 
+# 使用 cpp-httplib (Header-only library, typically available via CONFIG or module mode)
+find_package(cpp-httplib CONFIG REQUIRED)
+
 # 包含头文件目录
 include_directories(include)
 
@@ -43,6 +46,7 @@ target_link_libraries(matcher_core PRIVATE
     nlohmann_json::nlohmann_json 
     spdlog::spdlog 
     unofficial::libmysql::libmysql # vcpkg 中 libmysql 暴露的 target
+    cpp-httplib::cpp-httplib       # HTTP library target
 )
 # 2. 可执行文件 (Executable)
 add_executable(matcher_server src/main.cpp)

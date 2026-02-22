@@ -36,7 +36,8 @@
 * nlohmann-json: JSON 序列化/反序列化  
 * spdlog: 高性能异步日志  
 * gtest: 单元测试框架  
-* mysql-connector-cpp: 数据库连接 （仅用于测试，生产环境中由java层管理）
+* libmysql: MySQL C客户端库 （仅用于测试，生产环境中由java层管理）
+* cpp-httplib: 轻量级 C++ HTTP 库 (用于与 Java 层通信)
 
 ## **4\. 构建步骤 (Build Instructions)**
 
@@ -77,7 +78,7 @@ matcher-server/
 ├── src/                    \#T 源代码  
 │   ├── main.cpp            \#T 入口点  
 │   ├── core/               \#T 核心逻辑 (OrderBook, MatchingEngine)  
-│   ├── ipc/                \#T 进程间通信接口 (如使用共享内存或消息队列)
+│   ├── ipc/                \#T 进程间通信接口 (包含 HTTP 和 Stdio 实现)
 │   ├── network/            \#F 网络层 (Gateway Interface)  
 │   └── util/               \#F工具类 (Logger, Time)  
 ├── include/                \#T 头文件  
