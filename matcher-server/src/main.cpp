@@ -19,8 +19,9 @@
 #include "persistence/MySQLPersistence.h"
 #include "persistence/ProxyPersistence.h"
 #include "util/Logger.h"
+#include "core/IMatchingEngine.h"
 
-// TODO: 包含核心引擎头文件（由其他开发者实现）
+// TODO: 包含核心引擎实现头文件（由其他开发者实现）
 // #include "core/MatchingEngine.h"
 
 using namespace matcher;

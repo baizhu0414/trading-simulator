@@ -27,6 +27,11 @@ private:
     std::string javaHost_;                              ///< Java 服务地址
     int javaPort_;                                      ///< Java 服务端口 (默认 8081)
     std::function<void(model::Order)> orderCallback_;
+    std::function<std::vector<model::Trade>(
+        const std::string&,
+        const std::string&,
+        const std::vector<model::Order>&,
+        const std::vector<model::Order>&)> matchCallback_;
     std::atomic<bool> running_{false};
     std::unique_ptr<std::thread> serverThread_;
     std::mutex callbackMutex_;
@@ -49,6 +54,12 @@ public:
     virtual bool start() override;
     virtual void stop() override;
     virtual void setOrderCallback(std::function<void(model::Order)> callback) override;
+    virtual void setMatchCallback(
+        std::function<std::vector<model::Trade>(
+            const std::string&,
+            const std::string&,
+            const std::vector<model::Order>&,
+            const std::vector<model::Order>&)> callback) override;
     virtual bool sendExecutionReport(const model::Trade& trade) override;
     virtual bool sendCommand(const std::string& type, const std::string& payload) override;
 

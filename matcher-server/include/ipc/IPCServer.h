@@ -40,6 +40,18 @@ public:
     virtual void setOrderCallback(std::function<void(model::Order)> callback) = 0;
     
     /**
+     * @brief 设置批量撮合回调函数
+     * 
+     * @param callback 当接收到批量撮合请求时调用的函数
+     */
+    virtual void setMatchCallback(
+        std::function<std::vector<model::Trade>(
+            const std::string&,
+            const std::string&,
+            const std::vector<model::Order>&,
+            const std::vector<model::Order>&)> callback) = 0;
+    
+    /**
      * @brief 发送成交回报
      * 
      * @param trade 成交记录

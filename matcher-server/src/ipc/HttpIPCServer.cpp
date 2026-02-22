@@ -83,6 +83,16 @@ void HttpIPCServer::setOrderCallback(std::function<void(model::Order)> callback)
     orderCallback_ = std::move(callback);
 }
 
+void HttpIPCServer::setMatchCallback(
+    std::function<std::vector<model::Trade>(
+        const std::string&,
+        const std::string&,
+        const std::vector<model::Order>&,
+        const std::vector<model::Order>&)> callback) {
+    std::lock_guard<std::mutex> lock(callbackMutex_);
+    matchCallback_ = std::move(callback);
+}
+
 bool HttpIPCServer::sendExecutionReport(const model::Trade& trade) {
     try {
         json j;
@@ -204,17 +214,33 @@ void HttpIPCServer::handleMatchRequest(const httplib::Request& req, httplib::Res
                   << " with " << buyOrders.size() << " buy orders and " 
                   << sellOrders.size() << " sell orders" << std::endl;
         
-        // TODO: 调用撮合引擎处理
-        // auto result = matchingEngine->match(market, securityId, buyOrders, sellOrders);
-        
-        // 暂时返回空结果
-        json response;
-        response["trades"] = json::array();
-        response["remainingBuyOrders"] = json::array();
-        response["remainingSellOrders"] = json::array();
-        
-        res.status = 200;
-        res.set_content(response.dump(), "application/json");
+        // 通过回调调用撮合引擎
+        std::lock_guard<std::mutex> lock(callbackMutex_);
+        if (matchCallback_) {
+            auto trades = matchCallback_(market, securityId, buyOrders, sellOrders);
+            
+            // 返回成交结果
+            json response;
+            response["trades"] = json::array();
+            for (const auto& trade : trades) {
+                response["trades"].push_back({
+                    {"tradeId", trade.tradeId},
+                    {"clOrderIdBuy", trade.clOrderIdBuy},
+                    {"clOrderIdSell", trade.clOrderIdSell},
+                    {"securityId", trade.securityId},
+                    {"price", trade.price},
+                    {"quantity", trade.quantity},
+                    {"market", trade.market}
+                });
+            }
+            
+            res.status = 200;
+            res.set_content(response.dump(), "application/json");
+        } else {
+            // 回调未设置
+            res.status = 503;
+            res.set_content("{\"error\":\"Match callback not set\"}", "application/json");
+        }
         
     } catch (const std::exception& e) {
         std::cerr << "[HttpIPCServer] Error handling match request: " << e.what() << std::endl;
