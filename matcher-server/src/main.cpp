@@ -178,16 +178,34 @@ int main(int argc, char* argv[]) {
         // 5. 创建持久化实例
         auto persistence = createPersistence(config, ipcServer.get());
         
-        // 6. 创建核心引擎（TODO: 由其他开发者实现）
+        // 6. 创建核心引擎（TODO: 由其他开发者实现 createMatchingEngine 函数）
         std::cout << "[初始化] 创建核心撮合引擎...\n";
-        // auto engine = std::make_unique<core::MatchingEngine>(std::move(persistence));
+        // 注意: createMatchingEngine 函数需要由负责撮合引擎的开发者实现
+        // auto engine = core::createMatchingEngine(std::move(persistence), ipcServer.get());
+        std::cout << "[初始化] 撮合引擎接口已定义,等待实现...\n";
         
-        // 7. 设置IPC回调
+        // 7. 设置IPC回调（TODO: 等引擎实现后取消注释）
         std::cout << "[初始化] 设置IPC回调...\n";
-        ipcServer->setOrderCallback([](model::Order order) {
-            // TODO: 将订单传递给核心引擎
-            // engine->onOrderInput(std::move(order));
+        
+        // 单订单回调
+        ipcServer->setOrderCallback([/*&engine*/](model::Order order) {
+            // TODO: 取消注释以启用
+            // engine->submitOrder(std::move(order));
             std::cout << "[IPC] 接收到新订单: " << order.clOrderId << "\n";
+        });
+        
+        // 批量撮合回调
+        ipcServer->setMatchCallback([/*&engine*/](
+            const std::string& market,
+            const std::string& securityId,
+            const std::vector<model::Order>& buyOrders,
+            const std::vector<model::Order>& sellOrders) {
+            // TODO: 取消注释以启用
+            // return engine->matchBatch(market, securityId, buyOrders, sellOrders);
+            
+            // 临时返回空结果
+            std::cout << "[IPC] 接收到批量撮合请求: " << securityId << "\n";
+            return std::vector<model::Trade>();
         });
         
         // 8. 启动IPC服务器

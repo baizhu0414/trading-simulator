@@ -66,26 +66,86 @@ cmake \--build build \--config Release
 ### **第三步：运行测试 (Test)**
 
 cd build  
-ctest \-C Release \--output-on-failure
+ctest -C Release --output-on-failure
+
+### **第四步：运行程序 (Run)**
+
+编译成功后,可执行文件位于 `build/Release/matcher_server.exe` (Windows) 或 `build/matcher_server` (Linux/macOS)。
+
+**测试模式 (MySQL 直连):**
+
+```bash
+# Windows
+build\Release\matcher_server.exe --mode TEST --mysql mysqlx://root:password@localhost:3306/trading
+
+# Linux/macOS
+./build/matcher_server --mode TEST --mysql mysqlx://root:password@localhost:3306/trading
+```
+
+**生产模式 (远程代理):**
+
+```bash
+# Windows
+build\Release\matcher_server.exe --mode PRODUCTION --ipc http:9001:localhost:8081
+
+# Linux/macOS
+./build/matcher_server --mode PRODUCTION --ipc http:9001:localhost:8081
+```
+
+**命令行参数说明:**
+
+- `--mode <TEST|PRODUCTION>`: 运行模式
+  - `TEST`: 使用 MySQLPersistence 直连本地数据库
+  - `PRODUCTION`: 使用 ProxyPersistence 通过 Java 层访问数据库
+- `--mysql <url>`: MySQL 连接字符串 (TEST 模式必需)
+- `--ipc <config>`: IPC 配置,格式 `http:port:javaHost:javaPort`
+- `--verbose, -v`: 启用详细日志输出
+- `--help, -h`: 显示帮助信息
+
+**注意**: 当前版本需要撮合引擎实现后才能完整运行。
 
 ## **5\. 项目结构 (Project Structure)**
 
-**标注T的为必须的，标注F的为尚未明确是否存在的**
+```
+matcher-server/
+├── vcpkg.json              # 依赖清单 (自动管理依赖版本)
+├── CMakeLists.txt          # 主构建脚本
+├── matcher-server_README.md # 本文档
+├── docs/                   # 设计文档
+│   └── matcher-server_docs_design_v1.0.md
+├── include/                # 头文件
+│   ├── core/
+│   │   ├── IMatchingEngine.h    # 撮合引擎接口 (已定义)
+│   │   └── OrderBook.h          # 订单簿接口 (待实现)
+│   ├── ipc/
+│   │   ├── IPCServer.h          # IPC 抽象接口
+│   │   └── HttpIPCServer.h      # HTTP IPC 实现
+│   ├── model/
+│   │   ├── Order.h              # 订单数据模型
+│   │   └── Trade.h              # 成交数据模型
+│   ├── persistence/
+│   │   ├── IPersistence.h       # 持久化抽象接口
+│   │   ├── MySQLPersistence.h   # MySQL 直连实现
+│   │   └── ProxyPersistence.h   # 远程代理实现
+│   └── util/
+│       └── Logger.h             # 日志接口 (待实现)
+├── src/                    # 源代码
+│   ├── main.cpp            # 入口点
+│   ├── ipc/
+│   │   ├── HttpIPCServer.cpp    # HTTP IPC 实现
+│   │   └── StdioIPCServer.cpp   # Stdio IPC (已废弃)
+│   └── persistence/
+│       ├── MySQLPersistence.cpp
+│       └── ProxyPersistence.cpp
+├── tests/                  # GoogleTest 测试用例 (待添加)
+└── benchmarks/             # 性能基准测试 (待添加)
+```
 
-matcher-server/  
-├── vcpkg.json              \#T 依赖清单 (自动管理依赖版本)  
-├── CMakeLists.txt          \#T 主构建脚本  
-├── src/                    \#T 源代码  
-│   ├── main.cpp            \#T 入口点  
-│   ├── core/               \#T 核心逻辑 (OrderBook, MatchingEngine)  
-│   ├── ipc/                \#T 进程间通信接口 (包含 HTTP 和 Stdio 实现)
-│   ├── network/            \#F 网络层 (Gateway Interface)  
-│   └── util/               \#F工具类 (Logger, Time)  
-├── include/                \#T 头文件  
-│   └── matcher/            \#F 公开头文件  
-
-├── tests/                  \#T GoogleTest 测试用例  
-└── benchmarks/             \#T 性能基准测试
+**当前状态:**
+- ✅ 基础设施层完成 (IPC, Persistence, Model)
+- ✅ 撮合引擎接口已定义 (IMatchingEngine)
+- ⏳ 撮合引擎实现待完成 (MatchingEngine, OrderBook)
+- ⏳ 日志系统待实现 (Logger)
 
 ## **6\. 开发规范 (Coding Standard)**
 
