@@ -12,7 +12,7 @@
 #include <nlohmann/json.hpp>
 
 using json = nlohmann::json;
-
+// 注意，本项目采取HTTP通信而不是标准输入输出通信，因此 StdioIPCServer 类已废弃，相关代码仅供参考。
 namespace matcher {
 namespace ipc {
 
