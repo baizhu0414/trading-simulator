@@ -4,47 +4,116 @@
 #include <iostream>
 #include <chrono>
 #include <sstream>
+#include <regex>
+#include <stdexcept>
 
 namespace matcher {
 namespace persistence {
 
 MySQLPersistence::MySQLPersistence(const std::string& connectionString)
-    : connectionString_(connectionString) {
-    // 延迟连接，直到第一次使用时再建立连接
+    : port_(3306) {
+    parseConnectionString(connectionString);
 }
 
 MySQLPersistence::~MySQLPersistence() {
     disconnect();
 }
 
+void MySQLPersistence::parseConnectionString(const std::string& connectionString) {
+    // 解析格式: mysqlx://user:password@host:port/database
+    std::regex pattern(R"(mysqlx?://([^:]+):([^@]+)@([^:]+):(\d+)/(.+))");
+    std::smatch matches;
+    
+    if (std::regex_match(connectionString, matches, pattern)) {
+        user_ = matches[1].str();
+        password_ = matches[2].str();
+        host_ = matches[3].str();
+        port_ = std::stoi(matches[4].str());
+        database_ = matches[5].str();
+    } else {
+        throw std::invalid_argument("Invalid connection string format. Expected: mysqlx://user:password@host:port/database");
+    }
+}
+
 bool MySQLPersistence::connect() {
     std::lock_guard<std::mutex> lock(connectionMutex_);
     
-    if (session_) {
+    if (connection_) {
         return true; // 已经连接
     }
     
     try {
-        // TODO: 使用mysql-connector-cpp建立连接
-        // 由于当前vcpkg.json中只有libmysql，暂时使用占位实现
-        // 在实际实现中，这里应该创建mysqlx::Session
-        std::cout << "[MySQLPersistence] Connecting to: " << connectionString_ << std::endl;
+        // 初始化 MySQL 库（线程安全）
+        if (mysql_library_init(0, nullptr, nullptr) != 0) {
+            std::cerr << "[MySQLPersistence] Failed to initialize MySQL library" << std::endl;
+            return false;
+        }
         
-        // 模拟连接成功
-        // session_ = std::make_unique<mysqlx::Session>(connectionString_);
-        // ensureTablesExist();
+        // 初始化连接对象
+        MYSQL* conn = mysql_init(nullptr);
+        if (!conn) {
+            std::cerr << "[MySQLPersistence] mysql_init failed" << std::endl;
+            return false;
+        }
         
-        std::cout << "[MySQLPersistence] Connected successfully" << std::endl;
+        // 设置字符集为 UTF-8
+        mysql_options(conn, MYSQL_SET_CHARSET_NAME, "utf8mb4");
+        
+        // 建立连接
+        if (!mysql_real_connect(conn, host_.c_str(), user_.c_str(), password_.c_str(),
+                                database_.c_str(), port_, nullptr, 0)) {
+            std::string error = mysql_error(conn);
+            std::cerr << "[MySQLPersistence] Connection failed: " << error << std::endl;
+            mysql_close(conn);
+            return false;
+        }
+        
+        connection_.reset(conn);
+        std::cout << "[MySQLPersistence] Connected to " << host_ << ":" << port_ 
+                  << "/" << database_ << std::endl;
+        
+        // 确保表存在
+        ensureTablesExist();
+        
         return true;
     } catch (const std::exception& e) {
-        std::cerr << "[MySQLPersistence] Connection failed: " << e.what() << std::endl;
+        std::cerr << "[MySQLPersistence] Connection exception: " << e.what() << std::endl;
         return false;
     }
 }
 
 void MySQLPersistence::disconnect() {
     std::lock_guard<std::mutex> lock(connectionMutex_);
-    session_.reset();
+    connection_.reset();
+    mysql_library_end();
+}
+
+std::string MySQLPersistence::escapeString(const std::string& str) {
+    if (!connection_) {
+        throw std::runtime_error("Database connection not available");
+    }
+    
+    std::vector<char> buffer(str.length() * 2 + 1);
+    mysql_real_escape_string(connection_.get(), buffer.data(), str.c_str(), str.length());
+    return std::string(buffer.data());
+}
+
+void MySQLPersistence::executeSQL(const std::string& sql) {
+    if (!connection_) {
+        throw std::runtime_error("Database connection not available");
+    }
+    
+    if (mysql_query(connection_.get(), sql.c_str()) != 0) {
+        std::string error = mysql_error(connection_.get());
+        throw std::runtime_error("SQL execution failed: " + error + "\nSQL: " + sql);
+    }
+}
+
+MYSQL* MySQLPersistence::getConnection() {
+    if (!connection_) {
+        throw std::runtime_error("Database connection not available");
+    }
+    return connection_.get();
 }
 
 void MySQLPersistence::saveTrade(const model::Trade& trade) {
@@ -53,17 +122,18 @@ void MySQLPersistence::saveTrade(const model::Trade& trade) {
     }
     
     try {
-        // TODO: 实现实际的数据库插入
         std::stringstream sql;
         sql << "INSERT INTO trades (trade_id, cl_order_id_buy, cl_order_id_sell, "
             << "security_id, price, quantity, timestamp) VALUES ('"
-            << trade.tradeId << "', '"
-            << trade.clOrderIdBuy << "', '"
-            << trade.clOrderIdSell << "', '"
-            << trade.securityId << "', "
+            << escapeString(trade.tradeId) << "', '"
+            << escapeString(trade.clOrderIdBuy) << "', '"
+            << escapeString(trade.clOrderIdSell) << "', '"
+            << escapeString(trade.securityId) << "', "
             << trade.price << ", "
             << trade.quantity << ", "
-            << trade.timestamp << ")";
+            << std::chrono::duration_cast<std::chrono::milliseconds>(
+                trade.timestamp.time_since_epoch()).count()
+            << ")";
         
         executeSQL(sql.str());
         
@@ -80,14 +150,13 @@ void MySQLPersistence::updateOrder(const model::Order& order) {
     }
     
     try {
-        // TODO: 实现实际的数据库更新
         std::stringstream sql;
-        sql << "UPDATE orders SET status = '" << order.status 
+        sql << "UPDATE orders SET status = '" << escapeString(order.status) 
             << "', executed_quantity = " << order.executedQuantity
             << ", last_executed_price = " << order.lastExecutedPrice
             << ", last_updated = " << std::chrono::duration_cast<std::chrono::milliseconds>(
                 std::chrono::system_clock::now().time_since_epoch()).count()
-            << " WHERE cl_order_id = '" << order.clOrderId << "'";
+            << " WHERE cl_order_id = '" << escapeString(order.clOrderId) << "'";
         
         executeSQL(sql.str());
         
@@ -106,23 +175,46 @@ std::vector<model::Order> MySQLPersistence::loadUnfinishedOrders(const std::stri
     std::vector<model::Order> orders;
     
     try {
-        // TODO: 实现实际的数据库查询
         std::stringstream sql;
-        sql << "SELECT * FROM orders WHERE security_id = '" << securityId 
-            << "' AND status IN ('NEW', 'PARTIALLY_FILLED')";
+        sql << "SELECT cl_order_id, security_id, side, price, quantity, "
+            << "executed_quantity, last_executed_price, status, order_type, "
+            << "time_in_force, timestamp FROM orders WHERE security_id = '" 
+            << escapeString(securityId) << "' AND status IN ('NEW', 'PARTIALLY_FILLED')";
         
-        // 模拟查询结果
-        std::cout << "[MySQLPersistence] Loading unfinished orders for security: " << securityId << std::endl;
+        executeSQL(sql.str());
         
-        // 在实际实现中，这里应该执行SQL并解析结果集
-        // auto result = getSession().sql(sql.str()).execute();
-        // for (auto row : result) {
-        //     model::Order order;
-        //     // 从row填充order字段
-        //     orders.push_back(order);
-        // }
+        MYSQL_RES* result = mysql_store_result(connection_.get());
+        if (!result) {
+            throw std::runtime_error(std::string("Failed to get result: ") + mysql_error(connection_.get()));
+        }
         
-        std::cout << "[MySQLPersistence] Loaded " << orders.size() << " unfinished orders" << std::endl;
+        MYSQL_ROW row;
+        while ((row = mysql_fetch_row(result))) {
+            model::Order order;
+            order.clOrderId = row[0] ? row[0] : "";
+            order.securityId = row[1] ? row[1] : "";
+            order.side = row[2] ? row[2] : "";
+            order.price = row[3] ? std::stod(row[3]) : 0.0;
+            order.quantity = row[4] ? std::stoll(row[4]) : 0;
+            order.executedQuantity = row[5] ? std::stoll(row[5]) : 0;
+            order.lastExecutedPrice = row[6] ? std::stod(row[6]) : 0.0;
+            order.status = row[7] ? row[7] : "";
+            order.orderType = row[8] ? row[8] : "";
+            order.timeInForce = row[9] ? row[9] : "";
+            
+            if (row[10]) {
+                int64_t timestamp_ms = std::stoll(row[10]);
+                order.timestamp = std::chrono::system_clock::time_point(
+                    std::chrono::milliseconds(timestamp_ms));
+            }
+            
+            orders.push_back(order);
+        }
+        
+        mysql_free_result(result);
+        
+        std::cout << "[MySQLPersistence] Loaded " << orders.size() 
+                  << " unfinished orders for security: " << securityId << std::endl;
     } catch (const std::exception& e) {
         std::cerr << "[MySQLPersistence] Failed to load unfinished orders: " << e.what() << std::endl;
         throw;
@@ -141,11 +233,19 @@ void MySQLPersistence::saveTrades(const std::vector<model::Trade>& trades) {
     }
     
     try {
-        // TODO: 实现批量插入
         std::cout << "[MySQLPersistence] Saving " << trades.size() << " trades in batch" << std::endl;
         
-        for (const auto& trade : trades) {
-            saveTrade(trade);
+        // 使用事务提高批量插入性能
+        executeSQL("START TRANSACTION");
+        
+        try {
+            for (const auto& trade : trades) {
+                saveTrade(trade);
+            }
+            executeSQL("COMMIT");
+        } catch (...) {
+            executeSQL("ROLLBACK");
+            throw;
         }
     } catch (const std::exception& e) {
         std::cerr << "[MySQLPersistence] Failed to save trades batch: " << e.what() << std::endl;
@@ -163,11 +263,19 @@ void MySQLPersistence::updateOrders(const std::vector<model::Order>& orders) {
     }
     
     try {
-        // TODO: 实现批量更新
         std::cout << "[MySQLPersistence] Updating " << orders.size() << " orders in batch" << std::endl;
         
-        for (const auto& order : orders) {
-            updateOrder(order);
+        // 使用事务提高批量更新性能
+        executeSQL("START TRANSACTION");
+        
+        try {
+            for (const auto& order : orders) {
+                updateOrder(order);
+            }
+            executeSQL("COMMIT");
+        } catch (...) {
+            executeSQL("ROLLBACK");
+            throw;
         }
     } catch (const std::exception& e) {
         std::cerr << "[MySQLPersistence] Failed to update orders batch: " << e.what() << std::endl;
@@ -177,7 +285,7 @@ void MySQLPersistence::updateOrders(const std::vector<model::Order>& orders) {
 
 void MySQLPersistence::ensureTablesExist() {
     try {
-        // 创建trades表
+        // 创建 trades 表
         std::string createTradesTable = R"(
             CREATE TABLE IF NOT EXISTS trades (
                 trade_id VARCHAR(64) PRIMARY KEY,
@@ -185,22 +293,22 @@ void MySQLPersistence::ensureTablesExist() {
                 cl_order_id_sell VARCHAR(64) NOT NULL,
                 security_id VARCHAR(20) NOT NULL,
                 price DECIMAL(20, 8) NOT NULL,
-                quantity DECIMAL(20, 8) NOT NULL,
+                quantity BIGINT NOT NULL,
                 timestamp BIGINT NOT NULL,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 INDEX idx_security_timestamp (security_id, timestamp)
-            )
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
         )";
         
-        // 创建orders表
+        // 创建 orders 表
         std::string createOrdersTable = R"(
             CREATE TABLE IF NOT EXISTS orders (
                 cl_order_id VARCHAR(64) PRIMARY KEY,
                 security_id VARCHAR(20) NOT NULL,
                 side VARCHAR(10) NOT NULL,
                 price DECIMAL(20, 8) NOT NULL,
-                quantity DECIMAL(20, 8) NOT NULL,
-                executed_quantity DECIMAL(20, 8) DEFAULT 0,
+                quantity BIGINT NOT NULL,
+                executed_quantity BIGINT DEFAULT 0,
                 last_executed_price DECIMAL(20, 8),
                 status VARCHAR(20) NOT NULL,
                 order_type VARCHAR(20),
@@ -210,7 +318,7 @@ void MySQLPersistence::ensureTablesExist() {
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 INDEX idx_security_status (security_id, status),
                 INDEX idx_timestamp (timestamp)
-            )
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
         )";
         
         executeSQL(createTradesTable);
@@ -221,19 +329,6 @@ void MySQLPersistence::ensureTablesExist() {
         std::cerr << "[MySQLPersistence] Failed to ensure tables exist: " << e.what() << std::endl;
         throw;
     }
-}
-
-void MySQLPersistence::executeSQL(const std::string& sql) {
-    // TODO: 实际执行SQL语句
-    // getSession().sql(sql).execute();
-    std::cout << "[MySQLPersistence] Executing SQL: " << sql.substr(0, 100) << "..." << std::endl;
-}
-
-mysqlx::Session& MySQLPersistence::getSession() {
-    if (!session_) {
-        throw std::runtime_error("Database session not available");
-    }
-    return *session_;
 }
 
 } // namespace persistence
