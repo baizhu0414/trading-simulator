@@ -63,6 +63,37 @@ cmake \-B build \-S . \-DCMAKE\_TOOLCHAIN\_FILE="$VCPKG\_ROOT/scripts/buildsyste
 
 cmake \--build build \--config Release
 
+### **快速编译 (Quick Build - 适用于已配置的项目)**
+
+如果项目已经配置过（build目录已存在），可以使用以下简化命令：
+
+**Windows (PowerShell):**
+```powershell
+# 进入项目目录
+cd matcher-server
+
+# 快速编译（Debug配置，适合开发调试）
+cmake --build build --config Debug
+
+# 或者使用Release配置（适合性能测试）
+cmake --build build --config Release
+```
+
+**Linux / macOS (Bash):**
+```bash
+# 进入项目目录
+cd matcher-server
+
+# 快速编译
+cmake --build build --config Release
+```
+
+**注意：**
+- 快速编译假设项目已通过第一步配置
+- Debug配置生成调试信息，适合代码审查和bug检查
+- Release配置优化性能，适合生产环境测试
+- 可执行文件位置：`build/Debug/`（Debug）或 `build/Release/`（Release）
+
 ### **第三步：运行测试 (Test)**
 
 cd build  
