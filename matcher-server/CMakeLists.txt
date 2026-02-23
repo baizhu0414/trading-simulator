@@ -47,7 +47,7 @@ add_library(matcher_core
 )
 # 指定头文件搜索路径
 target_include_directories(matcher_core PUBLIC include)
-# 链接依赖
+# 链接依赖 #private 表示这些库仅在 matcher_core 内部使用，不会暴露给依赖 matcher_core 的目标,可能导致问题
 target_link_libraries(matcher_core PRIVATE 
     nlohmann_json::nlohmann_json 
     spdlog::spdlog 
