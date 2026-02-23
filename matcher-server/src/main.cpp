@@ -1,7 +1,7 @@
 /**
  * @file main.cpp
  * @brief 撮合引擎主程序入口
- * 
+ *
  * 负责：
  * 1. 解析命令行参数和配置文件
  * 2. 根据运行模式（TEST/PRODUCTION）选择持久化策略
@@ -29,56 +29,69 @@ using namespace matcher;
 /**
  * @brief 程序配置结构体
  */
-struct Config {
-    std::string mode = "TEST";         // 运行模式: TEST或PRODUCTION
+struct Config
+{
+    std::string mode = "TEST";                                              // 运行模式: TEST或PRODUCTION
     std::string mysqlUrl = "mysqlx://root:password@localhost:3306/trading"; // MySQL连接字符串
-    std::string ipcConfig = "stdio";   // IPC配置
-    bool verbose = false;              // 详细日志输出
+    std::string ipcConfig = "http:9001:localhost:8081";                     // IPC配置
+    bool verbose = false;                                                   // 详细日志输出
 };
 
 /**
  * @brief 解析命令行参数
- * 
+ *
  * @param argc 参数数量
  * @param argv 参数数组
  * @return Config 配置信息
  */
-Config parseArguments(int argc, char* argv[]) {
+Config parseArguments(int argc, char *argv[])
+{
     Config config;
-    
-    for (int i = 1; i < argc; ++i) {
-        if (strcmp(argv[i], "--mode") == 0 && i + 1 < argc) {
+
+    for (int i = 1; i < argc; ++i)
+    {
+        if (strcmp(argv[i], "--mode") == 0 && i + 1 < argc)
+        {
             config.mode = argv[++i];
-        } else if (strcmp(argv[i], "--mysql") == 0 && i + 1 < argc) {
+        }
+        else if (strcmp(argv[i], "--mysql") == 0 && i + 1 < argc)
+        {
             config.mysqlUrl = argv[++i];
-        } else if (strcmp(argv[i], "--ipc") == 0 && i + 1 < argc) {
+        }
+        else if (strcmp(argv[i], "--ipc") == 0 && i + 1 < argc)
+        {
             config.ipcConfig = argv[++i];
-        } else if (strcmp(argv[i], "--verbose") == 0 || strcmp(argv[i], "-v") == 0) {
+        }
+        else if (strcmp(argv[i], "--verbose") == 0 || strcmp(argv[i], "-v") == 0)
+        {
             config.verbose = true;
-        } else if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0) {
+        }
+        else if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0)
+        {
             std::cout << "Usage: " << argv[0] << " [options]\n";
             std::cout << "Options:\n";
             std::cout << "  --mode <TEST|PRODUCTION>   运行模式 (默认: TEST)\n";
             std::cout << "  --mysql <url>              MySQL连接字符串\n";
-            std::cout << "  --ipc <config>             IPC配置 (默认: stdio)\n";
+            std::cout << "  --ipc <config>             IPC配置 (默认: http:9001:localhost:8081)\n";
             std::cout << "  --verbose, -v              详细日志输出\n";
             std::cout << "  --help, -h                 显示帮助信息\n";
             std::exit(0);
         }
     }
-    
+
     return config;
 }
 
 /**
  * @brief 显示启动横幅
  */
-void showBanner(const Config& config) {
+void showBanner(const Config &config)
+{
     std::cout << "========================================\n";
     std::cout << "   C++ 撮合引擎 (Matcher Server) v0.1.0  \n";
     std::cout << "========================================\n";
     std::cout << "运行模式: " << config.mode << "\n";
-    std::cout << "持久化策略: " 
+    std::cout << "持久化策略: "
               << (config.mode == "TEST" ? "MySQL直连" : "远程代理(Java层)") << "\n";
     std::cout << "IPC配置: " << config.ipcConfig << "\n";
     std::cout << "========================================\n\n";
@@ -87,10 +100,12 @@ void showBanner(const Config& config) {
 /**
  * @brief 初始化日志系统
  */
-bool initLogger(const Config& config) {
+bool initLogger(const Config &config)
+{
     // 构建日志配置
     std::string logConfig = R"({
-        "level": ")" + std::string(config.verbose ? "DEBUG" : "INFO") + R"(",
+        "level": ")" + std::string(config.verbose ? "DEBUG" : "INFO") +
+                            R"(",
         "async_mode": true,
         "flush_interval": 1,
         "sinks": [
@@ -111,133 +126,149 @@ bool initLogger(const Config& config) {
             }
         ]
     })";
-    
+
     // 注意：Logger模块是占位实现，实际功能由其他开发者完成
     std::cout << "[初始化] 日志系统配置: " << logConfig.substr(0, 100) << "...\n";
-    
+
     // 实际调用
     // return util::Logger::init(logConfig);
-    
+
     std::cout << "[初始化] 日志系统已准备\n";
     return true;
 }
 
 /**
  * @brief 创建持久化实例
- * 
+ *
  * @param config 配置信息
  * @param ipcServer IPC服务器实例（用于PRODUCTION模式）
  * @return std::unique_ptr<persistence::IPersistence> 持久化实例
  */
 std::unique_ptr<persistence::IPersistence> createPersistence(
-    const Config& config,
-    ipc::IPCServer* ipcServer) {
-    
+    const Config &config,
+    ipc::IPCServer *ipcServer)
+{
+
     std::cout << "[初始化] 创建持久化实例 (模式: " << config.mode << ")\n";
-    
-    if (config.mode == "TEST") {
+
+    if (config.mode == "TEST")
+    {
         // 测试模式：使用MySQL直连
         auto persistence = std::make_unique<persistence::MySQLPersistence>(config.mysqlUrl);
         std::cout << "[初始化] 使用MySQL直连持久化\n";
         return persistence;
-    } else if (config.mode == "PRODUCTION") {
+    }
+    else if (config.mode == "PRODUCTION")
+    {
         // 生产模式：使用远程代理
-        if (!ipcServer) {
+        if (!ipcServer)
+        {
             throw std::runtime_error("PRODUCTION模式需要有效的IPC服务器实例");
         }
         auto persistence = std::make_unique<persistence::ProxyPersistence>(ipcServer);
         std::cout << "[初始化] 使用远程代理持久化\n";
         return persistence;
-    } else {
+    }
+    else
+    {
         throw std::runtime_error("未知的运行模式: " + config.mode);
     }
 }
 
-int main(int argc, char* argv[]) {
-    try {
+int main(int argc, char *argv[])
+{
+    try
+    {
         // 1. 解析配置
         Config config = parseArguments(argc, argv);
-        
+
         // 2. 显示启动信息
         showBanner(config);
-        
+
         // 3. 初始化日志系统
-        if (!initLogger(config)) {
+        if (!initLogger(config))
+        {
             std::cerr << "[错误] 日志系统初始化失败\n";
             return 1;
         }
-        
+
         // 4. 创建IPC服务器
         std::cout << "[初始化] 创建IPC服务器...\n";
         auto ipcServer = ipc::createIPCServer(config.ipcConfig);
-        if (!ipcServer) {
+        if (!ipcServer)
+        {
             std::cerr << "[错误] 无法创建IPC服务器\n";
             return 1;
         }
-        
+
         // 5. 创建持久化实例
         auto persistence = createPersistence(config, ipcServer.get());
-        
+
         // 6. 创建核心引擎（TODO: 由其他开发者实现 createMatchingEngine 函数）
         std::cout << "[初始化] 创建核心撮合引擎...\n";
         // 注意: createMatchingEngine 函数需要由负责撮合引擎的开发者实现
         // auto engine = core::createMatchingEngine(std::move(persistence), ipcServer.get());
         std::cout << "[初始化] 撮合引擎接口已定义,等待实现...\n";
-        
+
         // 7. 设置IPC回调（TODO: 等引擎实现后取消注释）
         std::cout << "[初始化] 设置IPC回调...\n";
-        
+
         // 单订单回调
-        ipcServer->setOrderCallback([/*&engine*/](model::Order order) {
+        ipcServer->setOrderCallback([/*&engine*/](model::Order order)
+                                    {
             // TODO: 取消注释以启用
             // engine->submitOrder(std::move(order));
-            std::cout << "[IPC] 接收到新订单: " << order.clOrderId << "\n";
-        });
-        
+            std::cout << "[IPC] 接收到新订单: " << order.clOrderId << "\n"; });
+
         // 批量撮合回调
         ipcServer->setMatchCallback([/*&engine*/](
-            const std::string& market,
-            const std::string& securityId,
-            const std::vector<model::Order>& buyOrders,
-            const std::vector<model::Order>& sellOrders) {
+                                        const std::string &market,
+                                        const std::string &securityId,
+                                        const std::vector<model::Order> &buyOrders,
+                                        const std::vector<model::Order> &sellOrders)
+                                    {
             // TODO: 取消注释以启用
             // return engine->matchBatch(market, securityId, buyOrders, sellOrders);
             
             // 临时返回空结果
             std::cout << "[IPC] 接收到批量撮合请求: " << securityId << "\n";
-            return std::vector<model::Trade>();
-        });
-        
+            return std::vector<model::Trade>(); });
+
         // 8. 启动IPC服务器
         std::cout << "[启动] 启动IPC服务器...\n";
-        if (!ipcServer->start()) {
+        if (!ipcServer->start())
+        {
             std::cerr << "[错误] IPC服务器启动失败\n";
             return 1;
         }
-        
+
         std::cout << "\n[系统状态] 撮合引擎已启动并运行\n";
         std::cout << "等待订单输入 (按Ctrl+C退出)...\n\n";
-        
+
         // 9. 主循环
         bool running = true;
-        while (running) {
+        while (running)
+        {
             // 简单的主循环，实际实现中可能处理其他事件
             std::this_thread::sleep_for(std::chrono::seconds(1));
-            
+
             // 可以添加心跳检查、性能监控等
         }
-        
+
         // 10. 停止系统
         std::cout << "\n[停止] 正在关闭系统...\n";
         ipcServer->stop();
         std::cout << "[停止] 系统已关闭\n";
-        
+
         return 0;
-        
-    } catch (const std::exception& e) {
+    }
+    catch (const std::exception &e)
+    {
         std::cerr << "[异常] " << e.what() << "\n";
         return 1;
-    } catch (...) {
+    }
+    catch (...)
+    {
         std::cerr << "[异常] 未知错误\n";
         return 1;
     }
