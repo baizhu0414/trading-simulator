@@ -15,6 +15,7 @@ public enum ErrorCodeEnum {
     PRICE_INVALID(1005, "订单价格必须大于等于0"),
     // 风控错误
     SELF_TRADE(2001, "同一股东号存在对敲交易"),
+    SYSTEM_BUSY(2002, "风控服务调用异常或系统繁忙"),
     // 撮合错误
     MATCH_FAILED(3001, "撮合失败");
 
