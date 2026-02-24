@@ -8,6 +8,9 @@
 #include <atomic>
 #include <thread>
 #include <mutex>
+#include <nlohmann/json.hpp>
+#include "model/Order.h"
+#include "model/Trade.h"
 
 namespace matcher {
 namespace ipc {

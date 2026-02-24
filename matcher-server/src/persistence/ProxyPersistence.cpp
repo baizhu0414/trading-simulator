@@ -3,6 +3,7 @@
 #include "model/Trade.h"
 #include "ipc/IPCServer.h"
 #include <nlohmann/json.hpp>
+#include <chrono>
 #include <iostream>
 
 using json = nlohmann::json;
@@ -26,7 +27,8 @@ void ProxyPersistence::saveTrade(const model::Trade& trade) {
         tradeJson["securityId"] = trade.securityId;
         tradeJson["price"] = trade.price;
         tradeJson["quantity"] = trade.quantity;
-        tradeJson["timestamp"] = trade.timestamp;
+        // serialize timestamp as milliseconds since epoch
+        tradeJson["timestamp"] = std::chrono::duration_cast<std::chrono::milliseconds>(trade.timestamp.time_since_epoch()).count();
         
         json payload;
         payload["trade"] = tradeJson;
@@ -50,13 +52,13 @@ void ProxyPersistence::updateOrder(const model::Order& order) {
         orderJson["securityId"] = order.securityId;
         orderJson["side"] = order.side;
         orderJson["price"] = order.price;
-        orderJson["quantity"] = order.quantity;
+        orderJson["quantity"] = order.qty;
         orderJson["executedQuantity"] = order.executedQuantity;
         orderJson["lastExecutedPrice"] = order.lastExecutedPrice;
         orderJson["status"] = order.status;
         orderJson["orderType"] = order.orderType;
         orderJson["timeInForce"] = order.timeInForce;
-        orderJson["timestamp"] = order.timestamp;
+        orderJson["timestamp"] = std::chrono::duration_cast<std::chrono::milliseconds>(order.timestamp.time_since_epoch()).count();
         
         json payload;
         payload["order"] = orderJson;
@@ -99,7 +101,7 @@ void ProxyPersistence::saveTrades(const std::vector<model::Trade>& trades) {
             tradeJson["securityId"] = trade.securityId;
             tradeJson["price"] = trade.price;
             tradeJson["quantity"] = trade.quantity;
-            tradeJson["timestamp"] = trade.timestamp;
+            tradeJson["timestamp"] = std::chrono::duration_cast<std::chrono::milliseconds>(trade.timestamp.time_since_epoch()).count();
             tradesArray.push_back(tradeJson);
         }
         
@@ -131,13 +133,13 @@ void ProxyPersistence::updateOrders(const std::vector<model::Order>& orders) {
             orderJson["securityId"] = order.securityId;
             orderJson["side"] = order.side;
             orderJson["price"] = order.price;
-            orderJson["quantity"] = order.quantity;
+            orderJson["quantity"] = order.qty;
             orderJson["executedQuantity"] = order.executedQuantity;
             orderJson["lastExecutedPrice"] = order.lastExecutedPrice;
             orderJson["status"] = order.status;
             orderJson["orderType"] = order.orderType;
             orderJson["timeInForce"] = order.timeInForce;
-            orderJson["timestamp"] = order.timestamp;
+            orderJson["timestamp"] = std::chrono::duration_cast<std::chrono::milliseconds>(order.timestamp.time_since_epoch()).count();
             ordersArray.push_back(orderJson);
         }
         

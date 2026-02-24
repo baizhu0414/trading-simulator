@@ -14,6 +14,14 @@
 #include <memory>
 #include <string>
 #include <cstring>
+#include <sstream>
+#include <thread>
+#include <chrono>
+#include <filesystem>
+#include <locale>
+#ifdef _WIN32
+#include <windows.h>
+#endif
 #include "ipc/IPCServer.h"
 #include "persistence/IPersistence.h"
 #include "persistence/MySQLPersistence.h"
@@ -58,11 +66,11 @@ Config parseArguments(int argc, char* argv[]) {
         } else if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0) {
             std::cout << "Usage: " << argv[0] << " [options]\n";
             std::cout << "Options:\n";
-            std::cout << "  --mode <TEST|PRODUCTION>   运行模式 (默认: TEST)\n";
-            std::cout << "  --mysql <url>              MySQL连接字符串\n";
-            std::cout << "  --ipc <config>             IPC配置 (默认: stdio)\n";
-            std::cout << "  --verbose, -v              详细日志输出\n";
-            std::cout << "  --help, -h                 显示帮助信息\n";
+            std::cout << "  --mode <TEST|PRODUCTION>   Run mode (default: TEST)\n";
+            std::cout << "  --mysql <url>              MySQL connection string\n";
+            std::cout << "  --ipc <config>             IPC config (default: stdio)\n";
+            std::cout << "  --verbose, -v              Verbose logging\n";
+            std::cout << "  --help, -h                 Show help\n";
             std::exit(0);
         }
     }
@@ -75,12 +83,12 @@ Config parseArguments(int argc, char* argv[]) {
  */
 void showBanner(const Config& config) {
     std::cout << "========================================\n";
-    std::cout << "   C++ 撮合引擎 (Matcher Server) v0.1.0  \n";
+    std::cout << "   C++ Matcher Server v0.1.0  \n";
     std::cout << "========================================\n";
-    std::cout << "运行模式: " << config.mode << "\n";
-    std::cout << "持久化策略: " 
-              << (config.mode == "TEST" ? "MySQL直连" : "远程代理(Java层)") << "\n";
-    std::cout << "IPC配置: " << config.ipcConfig << "\n";
+    std::cout << "Run mode: " << config.mode << "\n";
+    std::cout << "Persistence strategy: " 
+              << (config.mode == "TEST" ? "MySQL direct" : "Remote proxy (Java)") << "\n";
+    std::cout << "IPC config: " << config.ipcConfig << "\n";
     std::cout << "========================================\n\n";
 }
 
@@ -88,37 +96,35 @@ void showBanner(const Config& config) {
  * @brief 初始化日志系统
  */
 bool initLogger(const Config& config) {
-    // 构建日志配置
-    std::string logConfig = R"({
-        "level": ")" + std::string(config.verbose ? "DEBUG" : "INFO") + R"(",
-        "async_mode": true,
-        "flush_interval": 1,
-        "sinks": [
-            {
-                "type": "file",
-                "filename": "logs/orders.log",
-                "rotation_size": 10485760
-            },
-            {
-                "type": "file",
-                "filename": "logs/db.log",
-                "rotation_size": 10485760
-            },
-            {
-                "type": "file",
-                "filename": "logs/system.log",
-                "rotation_size": 10485760
-            }
-        ]
-    })";
+    // 构建日志配置为单行 JSON 字符串（避免跨编码原始字符串字面量问题）
+    std::string level = config.verbose ? "DEBUG" : "INFO";
+    std::ostringstream lcfg;
+    lcfg << "{\"level\":\"" << level << "\","
+         << "\"async_mode\":true,"
+         << "\"flush_interval\":1,"
+         << "\"sinks\":["
+         << "{\"type\":\"file\",\"filename\":\"logs/orders.log\",\"rotation_size\":10485760},"
+         << "{\"type\":\"file\",\"filename\":\"logs/db.log\",\"rotation_size\":10485760},"
+         << "{\"type\":\"file\",\"filename\":\"logs/system.log\",\"rotation_size\":10485760}"
+         << "]}"
+    ;
+    std::string logConfig = lcfg.str();
     
-    // 注意：Logger模块是占位实现，实际功能由其他开发者完成
-    std::cout << "[初始化] 日志系统配置: " << logConfig.substr(0, 100) << "...\n";
-    
-    // 实际调用
-    // return util::Logger::init(logConfig);
-    
-    std::cout << "[初始化] 日志系统已准备\n";
+    // Ensure logs directory exists
+    try {
+        std::filesystem::create_directories("logs");
+    } catch (...) {
+        std::cerr << "[Init] Failed to create logs directory\n";
+        return false;
+    }
+
+    std::cout << "[Init] Logger config: " << logConfig.substr(0, 100) << "...\n";
+    bool ok = util::Logger::init(logConfig);
+    if (!ok) {
+        std::cerr << "[Init] Logger initialization failed\n";
+        return false;
+    }
+    std::cout << "[Init] Logger ready\n";
     return true;
 }
 
@@ -133,12 +139,12 @@ std::unique_ptr<persistence::IPersistence> createPersistence(
     const Config& config,
     ipc::IPCServer* ipcServer) {
     
-    std::cout << "[初始化] 创建持久化实例 (模式: " << config.mode << ")\n";
+    std::cout << "[Init] Creating persistence instance (mode: " << config.mode << ")\n";
     
     if (config.mode == "TEST") {
         // 测试模式：使用MySQL直连
         auto persistence = std::make_unique<persistence::MySQLPersistence>(config.mysqlUrl);
-        std::cout << "[初始化] 使用MySQL直连持久化\n";
+        std::cout << "[Init] Using MySQL direct persistence\n";
         return persistence;
     } else if (config.mode == "PRODUCTION") {
         // 生产模式：使用远程代理
@@ -146,7 +152,7 @@ std::unique_ptr<persistence::IPersistence> createPersistence(
             throw std::runtime_error("PRODUCTION模式需要有效的IPC服务器实例");
         }
         auto persistence = std::make_unique<persistence::ProxyPersistence>(ipcServer);
-        std::cout << "[初始化] 使用远程代理持久化\n";
+        std::cout << "[Init] Using remote proxy persistence\n";
         return persistence;
     } else {
         throw std::runtime_error("未知的运行模式: " + config.mode);
@@ -155,6 +161,14 @@ std::unique_ptr<persistence::IPersistence> createPersistence(
 
 int main(int argc, char* argv[]) {
     try {
+    // Ensure Windows console uses UTF-8 so UTF-8 encoded output appears correctly
+#ifdef _WIN32
+    SetConsoleOutputCP(CP_UTF8);
+    SetConsoleCP(CP_UTF8);
+#endif
+    std::locale::global(std::locale(""));
+    std::cout.imbue(std::locale());
+    std::cerr.imbue(std::locale());
         // 1. 解析配置
         Config config = parseArguments(argc, argv);
         
@@ -168,55 +182,56 @@ int main(int argc, char* argv[]) {
         }
         
         // 4. 创建IPC服务器
-        std::cout << "[初始化] 创建IPC服务器...\n";
+        std::cout << "[Init] Creating IPC server...\n";
         auto ipcServer = ipc::createIPCServer(config.ipcConfig);
         if (!ipcServer) {
-            std::cerr << "[错误] 无法创建IPC服务器\n";
+            std::cerr << "[Error] Failed to create IPC server\n";
             return 1;
         }
         
         // 5. 创建持久化实例
         auto persistence = createPersistence(config, ipcServer.get());
-        
-        // 6. 创建核心引擎（TODO: 由其他开发者实现 createMatchingEngine 函数）
-        std::cout << "[初始化] 创建核心撮合引擎...\n";
-        // 注意: createMatchingEngine 函数需要由负责撮合引擎的开发者实现
-        // auto engine = core::createMatchingEngine(std::move(persistence), ipcServer.get());
-        std::cout << "[初始化] 撮合引擎接口已定义,等待实现...\n";
+
+        // 6. 创建核心引擎
+        std::cout << "[Init] Creating core matching engine...\n";
+        auto engine = core::createMatchingEngine(std::move(persistence), ipcServer.get());
+        if (!engine) {
+            std::cerr << "[Error] Failed to create matching engine\n";
+            return 1;
+        }
+        std::cout << "[Init] Matching engine ready\n";
         
         // 7. 设置IPC回调（TODO: 等引擎实现后取消注释）
-        std::cout << "[初始化] 设置IPC回调...\n";
+        std::cout << "[Init] Setting IPC callbacks...\n";
         
         // 单订单回调
-        ipcServer->setOrderCallback([/*&engine*/](model::Order order) {
-            // TODO: 取消注释以启用
-            // engine->submitOrder(std::move(order));
-            std::cout << "[IPC] 接收到新订单: " << order.clOrderId << "\n";
+        // capture raw pointer to engine (engine owns the instance in this scope)
+        core::IMatchingEngine* enginePtr = engine.get();
+        ipcServer->setOrderCallback([enginePtr](model::Order order) {
+            if (enginePtr) enginePtr->submitOrder(order);
+            std::cout << "[IPC] Received new order: " << order.clOrderId << "\n";
         });
         
         // 批量撮合回调
-        ipcServer->setMatchCallback([/*&engine*/](
+        ipcServer->setMatchCallback([enginePtr](
             const std::string& market,
             const std::string& securityId,
             const std::vector<model::Order>& buyOrders,
             const std::vector<model::Order>& sellOrders) {
-            // TODO: 取消注释以启用
-            // return engine->matchBatch(market, securityId, buyOrders, sellOrders);
-            
-            // 临时返回空结果
-            std::cout << "[IPC] 接收到批量撮合请求: " << securityId << "\n";
+            std::cout << "[IPC] Received batch match request: " << securityId << "\n";
+            if (enginePtr) return enginePtr->matchBatch(market, securityId, buyOrders, sellOrders);
             return std::vector<model::Trade>();
         });
         
         // 8. 启动IPC服务器
-        std::cout << "[启动] 启动IPC服务器...\n";
+        std::cout << "[Start] Starting IPC server...\n";
         if (!ipcServer->start()) {
-            std::cerr << "[错误] IPC服务器启动失败\n";
+            std::cerr << "[Error] IPC server failed to start\n";
             return 1;
         }
         
-        std::cout << "\n[系统状态] 撮合引擎已启动并运行\n";
-        std::cout << "等待订单输入 (按Ctrl+C退出)...\n\n";
+        std::cout << "\n[Status] Matcher engine started and running\n";
+        std::cout << "Waiting for orders (Ctrl+C to exit)...\n\n";
         
         // 9. 主循环
         bool running = true;
@@ -228,17 +243,17 @@ int main(int argc, char* argv[]) {
         }
         
         // 10. 停止系统
-        std::cout << "\n[停止] 正在关闭系统...\n";
+        std::cout << "\n[Stop] Shutting down system...\n";
         ipcServer->stop();
-        std::cout << "[停止] 系统已关闭\n";
+        std::cout << "[Stop] System shut down\n";
         
         return 0;
         
     } catch (const std::exception& e) {
-        std::cerr << "[异常] " << e.what() << "\n";
+        std::cerr << "[Exception] " << e.what() << "\n";
         return 1;
     } catch (...) {
-        std::cerr << "[异常] 未知错误\n";
+        std::cerr << "[Exception] Unknown error\n";
         return 1;
     }
 }

@@ -1,7 +1,7 @@
 #pragma once
 
 #include "IPersistence.h"
-#include <mysql.h>
+#include <mysql/mysql.h>
 #include <memory>
 #include <string>
 #include <mutex>
