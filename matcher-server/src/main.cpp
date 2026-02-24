@@ -276,6 +276,7 @@ int main(int argc, char *argv[])
         // 10. 停止系统
         std::cout << "\n[Stop] Shutting down system...\n";
         ipcServer->stop();
+        util::Logger::shutdown();
         std::cout << "[Stop] System shut down\n";
 
         return 0;
@@ -283,11 +284,13 @@ int main(int argc, char *argv[])
     catch (const std::exception &e)
     {
         std::cerr << "[Exception] " << e.what() << "\n";
+        util::Logger::shutdown();
         return 1;
     }
     catch (...)
     {
         std::cerr << "[Exception] Unknown error\n";
+        util::Logger::shutdown();
         return 1;
     }
 }
