@@ -4,6 +4,7 @@ import com.example.trading.common.enums.OrderStatusEnum;
 import com.example.trading.domain.model.Order;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
+import org.apache.ibatis.annotations.Select;
 
 import java.time.LocalDateTime;
 import java.util.List;
@@ -50,5 +51,8 @@ public interface OrderMapper {
      */
     boolean existsByClOrderId(@Param("clOrderId") String clOrderId);
 
-    List<Order> selectByStatus(OrderStatusEnum status);
+    /**
+     * 查询所有未完成的订单（PROCESSING/MATCHING/NOT_FILLED）
+     */
+    List<Order> selectUnfinishedOrders();
 }

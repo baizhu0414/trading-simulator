@@ -8,6 +8,8 @@ import com.example.trading.common.enums.ErrorCodeEnum;
 import com.example.trading.common.enums.OrderStatusEnum;
 import com.example.trading.common.enums.ResponseCodeEnum;
 import com.example.trading.common.enums.SideEnum;
+import com.example.trading.domain.engine.MatchingEngine;
+import com.example.trading.domain.engine.result.MatchingResult;
 import com.example.trading.domain.model.Order;
 import com.example.trading.domain.model.Trade;
 import com.example.trading.domain.risk.SelfTradeChecker;
@@ -21,11 +23,14 @@ import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ExecutorService;
 
 /**
  * 交易所核心服务（修复解析/异常/校验问题+幂等订单加载到OrderBook）
@@ -40,15 +45,20 @@ public class ExchangeService {
     private final OrderMapper orderMapper;
     private final MeterRegistry meterRegistry;
     private final TradeResponseHelper tradeResponseHelper;
+    // 异步持久化服务
+    private final AsyncPersistService asyncPersistService;
+
+    private final MatchingEngine matchingEngine;
+    private final ExecutorService matchingExecutor = Executors.newSingleThreadExecutor();
 
     // 监控指标
     private Counter orderTotalCounter;
-    private Counter orderSuccessCounter; // todo：统计一下
+    private Counter orderSuccessCounter;
     private Counter orderFailedCounter;
     private Counter orderRejectCounter;
 
     @PostConstruct
-    public void initMetrics() {
+    public void init() {
         orderTotalCounter = meterRegistry.counter("trading.order.total");
         orderSuccessCounter = meterRegistry.counter("trading.order.success");
         orderFailedCounter = meterRegistry.counter("trading.order.failed");
@@ -92,7 +102,11 @@ public class ExchangeService {
 
             orderTotalCounter.increment();
             // 4. 核心事务处理
-            return processOrderInTransaction(order);
+            final Order finalOrder = order;
+            // 将撮合逻辑提交到单线程池，保证并发撮合安全
+            return CompletableFuture.supplyAsync(() -> {
+                return processOrderInMemory(finalOrder);
+            }, matchingExecutor).join(); // 注意：join() 会阻塞，建议全链路异步
 
         } catch (IllegalArgumentException e) {
             log.error("订单[{}]参数格式错误：{}", clOrderId, e.getMessage());
@@ -107,10 +121,9 @@ public class ExchangeService {
     }
 
     /**
-     * 事务内处理订单
+     * 新增：内存撮合流程（无事务，极速）
      */
-    @Transactional(rollbackFor = Exception.class) // 新增：事务注解，保障订单&成交记录DB更新原子性
-    public BaseResponse processOrderInTransaction(Order order) {
+    public BaseResponse processOrderInMemory(Order order) {
         String clOrderId = order.getClOrderId();
         try {
             // 1. 基础校验
@@ -118,7 +131,7 @@ public class ExchangeService {
             List<ErrorCodeEnum> validateErrors = orderValidator.validate(order);
             if (!validateErrors.isEmpty()) {
                 order.setStatus(OrderStatusEnum.REJECTED);
-                log.error("校验出错");
+                log.error("订单[{}]基础校验出错：{}", clOrderId, validateErrors.get(0).getDesc());
                 return rejectOrderPreInsert(order, validateErrors.get(0));
             }
 
@@ -131,19 +144,59 @@ public class ExchangeService {
                 return rejectOrderPreInsert(order, riskError);
             }
 
-            // 3. 风控通过，正式插入数据库
+            // ========== 核心新增：同步插入订单到数据库（订单入库的关键步骤） ==========
             int insertCount = orderMapper.insert(order);
+            if (insertCount <= 0) {
+                log.error("订单[{}]同步插入数据库失败，影响行数：{}", clOrderId, insertCount);
+                orderFailedCounter.increment();
+                return buildRejectResponse(order, ErrorCodeEnum.DB_INSERT_FAILED);
+            }
+            log.info("订单[{}]同步插入数据库成功", clOrderId);
+            // 插入成功后补充风控缓存（防止自成交）
+            selfTradeChecker.putCache(order);
 
-            // 4.单真正落库后，再补填风控缓存
-            if (insertCount > 0) {
-                selfTradeChecker.putCache(order);
+            // 3. 【核心修改】直接调用撮合引擎进行纯内存计算
+            order.setStatus(OrderStatusEnum.MATCHING);
+            MatchingResult matchingResult = matchingEngine.match(order); // 这里不再阻塞在数据库IO
+            Order matchedOrder = matchingResult.getMatchedOrder();
+            List<MatchingResult.MatchCounterDetail> matchDetails = matchingResult.getMatchDetails();
+
+            // 4. 【内存状态更新】兜底确认状态 (逻辑从 Helper 移到这里，只为返回结果)
+            List<Trade> trades = new ArrayList<>();
+            List<Order> counterOrders = new ArrayList<>();
+            List<OrderStatusEnum> counterStatus = new ArrayList<>();
+
+            if (matchDetails.isEmpty()) {
+                matchedOrder.setStatus(OrderStatusEnum.NOT_FILLED);
             }
 
-            return tradeResponseHelper.executeOrderTransaction(order);
+            // 组装返回对象 (仅用于前端展示，不涉及DB)
+            for (MatchingResult.MatchCounterDetail detail : matchDetails) {
+                Order counterOrder = detail.getCounterPartyOrder();
+                counterOrders.add(counterOrder);
+                Trade trade = buildTrade(matchedOrder, counterOrder, detail.getExecQty(), detail.getExecPrice());
+                trades.add(trade);
+                counterStatus.add(counterOrder.getStatus());
+            }
+
+            // 5. 【立即返回】构建响应，不等待数据库
+            BaseResponse response = buildTradeResponse(matchedOrder, trades, counterStatus);
+            // 标记订单处理成功
+            orderSuccessCounter.increment();
+
+            // 6. 【异步甩锅】把刚才计算出的结果丢给异步线程去写数据库
+            asyncPersistService.persistOrderAndTrades(matchedOrder, counterOrders, trades);
+
+            log.info("订单[{}]内存撮合完成，极速返回", clOrderId);
+            return response;
+
         } catch (Exception e) {
-            log.error("订单[{}]事务失败", clOrderId, e);
+            log.error("订单[{}]内存处理异常", clOrderId, e);
             orderFailedCounter.increment();
-            throw e;
+            // 注意：这里如果是在 insert 之后报错，数据库里会有一条 PROCESSING 状态的脏数据
+            // 需要在 OrderRecoveryService 里增加对 PROCESSING 状态超时订单的处理逻辑
+            ErrorCodeEnum errorCode = ErrorCodeEnum.matchDbError(e);
+            return buildRejectResponse(order, errorCode);
         }
     }
 
@@ -235,6 +288,5 @@ public class ExchangeService {
         }
         return builder.build();
     }
-
 
 }

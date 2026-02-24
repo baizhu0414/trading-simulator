@@ -9,7 +9,6 @@ import com.example.trading.common.enums.ResponseCodeEnum;
 import com.example.trading.domain.engine.MatchingEngine;
 import com.example.trading.domain.model.CancelOrder;
 import com.example.trading.domain.model.Order;
-import com.example.trading.domain.risk.SelfTradeChecker;
 import com.example.trading.domain.validation.CancelValidator;
 import com.example.trading.mapper.OrderMapper;
 import com.example.trading.util.JsonUtils;
@@ -34,8 +33,8 @@ public class CancelService {
     private final CancelValidator cancelValidator;
     private final MatchingEngine matchingEngine;
     private final OrderMapper orderMapper;
-    private final TradePersistenceService tradePersistenceService;
-    private final SelfTradeChecker selfTradeChecker;
+    // 新增：注入异步持久化服务
+    private final AsyncPersistService asyncPersistService;
     private final MeterRegistry meterRegistry;
 
     // 监控指标（保留）
@@ -82,7 +81,7 @@ public class CancelService {
     /**
      * 事务内处理撤单核心逻辑（终极简化版）
      */
-    @Transactional(rollbackFor = Exception.class)
+//    @Transactional(rollbackFor = Exception.class)
     public BaseResponse processCancelInTransaction(CancelOrder cancelOrder) {
         String origClOrderId = cancelOrder.getOrigClOrderId();
 
@@ -130,19 +129,18 @@ public class CancelService {
 //            originOrder.setVersion(originOrder.getVersion());
 
             // 7. 持久化更新订单信息
-            tradePersistenceService.updateOrder(originOrder);
+//            tradePersistenceService.updateOrder(originOrder);
 
-            // 8. 清理风控缓存
-//            selfTradeChecker.removeCache(originOrder.getShareholderId(), originOrder.getSecurityId());
-
-            // 9. 标记订单已撤销（加入 Validator 缓存）
+            // 7. 【立即返回】先告诉用户撤单成功了
             cancelValidator.markOrderAsCanceled(origClOrderId);
-
-            // 10. 构建成功响应（简化）
             cancelSuccessCounter.increment();
-            log.info("撤单请求处理成功：原订单[{}]已全量撤销", origClOrderId);
+            BaseResponse response = buildCancelConfirmResponse(cancelOrder, originOrder);
 
-            return buildCancelConfirmResponse(cancelOrder, originOrder);
+            // 8. 【异步】后台慢慢更新数据库
+            asyncPersistService.persistCancel(originOrder);
+
+            log.info("撤单[{}]内存处理完成，极速返回", origClOrderId);
+            return response;
 
         } catch (Exception e) {
             log.error("撤单请求[原订单：{}]事务处理失败", origClOrderId, e);

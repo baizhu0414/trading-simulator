@@ -1,7 +1,6 @@
 package com.example.trading.infrastructure.persistence;
 
-import com.example.trading.application.ExchangeService;
-import com.example.trading.application.response.BaseResponse;
+import com.example.trading.application.AsyncPersistService;
 import com.example.trading.common.enums.ErrorCodeEnum;
 import com.example.trading.common.enums.OrderStatusEnum;
 import com.example.trading.domain.engine.MatchingEngine;
@@ -49,6 +48,8 @@ public class OrderRecoveryService implements CommandLineRunner {
 
     @Value("${trading.recovery.batch-size:100}")
     private int batchSize;
+
+    private final AsyncPersistService asyncPersistenceService;
 
     @Resource
     private PlatformTransactionManager transactionManager;
@@ -120,14 +121,24 @@ public class OrderRecoveryService implements CommandLineRunner {
                     totalRecovered, totalSkipped, totalFailed);
 
             // ========== 【核心修复】新增：全局主动撮合 ==========
-            log.info("【订单恢复】数据加载完成，涉及股票{}，开始执行全局主动撮合计", allRecoveredSecurities);
+            // 收集所有股票的撮合结果
+            List<MatchingEngine.RecoveryMatchResult> allRecoveryResults = new ArrayList<>();
+
             for (String securityId : allRecoveredSecurities) {
                 try {
                     log.info("【订单恢复】开始主动撮合股票[{}]", securityId);
-                    matchingEngine.matchOrderBookOrders(securityId);
+                    // 【修改】接收撮合结果
+                    List<MatchingEngine.RecoveryMatchResult> results = matchingEngine.matchOrderBookOrders(securityId);
+                    allRecoveryResults.addAll(results);
                 } catch (Exception e) {
                     log.error("【订单恢复】股票[{}]主动撮合失败", securityId, e);
                 }
+            }
+
+            // 【修改】将所有收集到的撮合结果，一次性丢给异步线程去持久化
+            if (!allRecoveryResults.isEmpty()) {
+                log.info("【订单恢复】内存撮合完成，产生{}笔成交，提交异步持久化...", allRecoveryResults.size());
+                asyncPersistenceService.persistRecoveryResults(allRecoveryResults);
             }
 
         } catch (Exception e) {

@@ -22,11 +22,11 @@ public enum SideEnum {
      * 根据code获取枚举（适配MyBatis映射）
      */
     public static SideEnum getByCode(String code) {
-        for (SideEnum side : values()) {
+        for (SideEnum side : SideEnum.values()) {
             if (side.getCode().equals(code)) {
                 return side;
             }
         }
-        return null;
+        throw new IllegalArgumentException("无效的 side code: " + code);
     }
 }

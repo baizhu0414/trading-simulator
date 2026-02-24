@@ -1,10 +1,7 @@
 package com.example.trading.application;
 
-import com.example.trading.application.response.BaseResponse;
 import com.example.trading.common.enums.OrderStatusEnum;
 import com.example.trading.common.enums.SideEnum;
-import com.example.trading.domain.engine.MatchingEngine;
-import com.example.trading.domain.engine.result.MatchingResult;
 import com.example.trading.domain.model.Order;
 import com.example.trading.domain.model.Trade;
 import com.example.trading.domain.risk.SelfTradeChecker;
@@ -13,12 +10,9 @@ import com.example.trading.mapper.TradeMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
-import java.util.ArrayList;
-import java.util.List;
 
 /**
  * 独立的成交/订单持久化服务（用于解耦 ExchangeService 和 MatchingEngine）

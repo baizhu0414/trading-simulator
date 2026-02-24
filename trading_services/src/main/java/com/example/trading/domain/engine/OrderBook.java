@@ -11,12 +11,12 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
 import java.math.BigDecimal;
-import java.util.Comparator;
-import java.util.Queue;
+import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.ConcurrentSkipListMap;
 import java.util.concurrent.LinkedBlockingQueue;
+import java.util.stream.Collectors;
 
 /**
  * 订单簿（修正价格类型为BigDecimal，解决类型不匹配+精度丢失问题）
@@ -283,5 +283,42 @@ public class OrderBook {
 
         log.warn("订单[{}]未在订单簿中找到", clOrderId);
         return null;
+    }
+
+    /**
+     * 新增：获取订单簿中所有订单（用于对账）
+     * 线程安全遍历，返回不可变列表（避免外部修改）
+     */
+    public List<Order> getAllOrders() {
+        List<Order> allOrders = new ArrayList<>();
+
+        // 遍历所有股票的订单簿（第一层：securityId）
+        for (Map.Entry<String, ConcurrentMap<SideEnum, ConcurrentSkipListMap<BigDecimal, Queue<Order>>>> securityEntry : orderBookMap.entrySet()) {
+            String securityId = securityEntry.getKey();
+            ConcurrentMap<SideEnum, ConcurrentSkipListMap<BigDecimal, Queue<Order>>> sideMap = securityEntry.getValue();
+
+            // 遍历买卖方向（第二层：SideEnum）
+            for (Map.Entry<SideEnum, ConcurrentSkipListMap<BigDecimal, Queue<Order>>> sideEntry : sideMap.entrySet()) {
+                SideEnum side = sideEntry.getKey();
+                ConcurrentSkipListMap<BigDecimal, Queue<Order>> priceMap = sideEntry.getValue();
+
+                // 遍历价格层级（第三层：BigDecimal价格）
+                for (Map.Entry<BigDecimal, Queue<Order>> priceEntry : priceMap.entrySet()) {
+                    BigDecimal price = priceEntry.getKey();
+                    Queue<Order> orderQueue = priceEntry.getValue();
+
+                    // 遍历价格下的所有订单（第四层：订单队列）
+                    // 使用stream+collect保证线程安全（LinkedBlockingQueue的迭代器是线程安全的）
+                    List<Order> queueOrders = orderQueue.stream().collect(Collectors.toList());
+                    allOrders.addAll(queueOrders);
+
+                    log.debug("股票[{}]方向[{}]价格[{}]下有{}笔订单", securityId, side.getDesc(), price, queueOrders.size());
+                }
+            }
+        }
+
+        log.info("订单簿中总计查询到{}笔订单（对账用）", allOrders.size());
+        // 返回不可变列表，避免外部修改订单簿数据
+        return Collections.unmodifiableList(allOrders);
     }
 }

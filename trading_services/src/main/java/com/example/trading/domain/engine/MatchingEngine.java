@@ -1,14 +1,18 @@
 package com.example.trading.domain.engine;
 
 import com.example.trading.application.TradePersistenceService;
+import com.example.trading.application.TradeResponseHelper;
 import com.example.trading.domain.engine.result.MatchingResult;
 import com.example.trading.domain.model.Order;
 import com.example.trading.common.enums.OrderStatusEnum;
 import com.example.trading.common.enums.SideEnum;
+import com.example.trading.domain.model.Trade;
 import io.micrometer.core.annotation.Timed;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
 import jakarta.annotation.PostConstruct;
+import lombok.AllArgsConstructor;
+import lombok.Data;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -16,9 +20,8 @@ import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
-import java.util.Iterator;
-import java.util.Map;
-import java.util.Queue;
+import java.time.LocalDateTime;
+import java.util.*;
 import java.util.concurrent.ConcurrentSkipListMap;
 
 /**
@@ -31,11 +34,12 @@ import java.util.concurrent.ConcurrentSkipListMap;
 public class MatchingEngine {
     private final OrderBook orderBook;
     private final PriceGenerator priceGenerator;
-    private final TradePersistenceService tradePersistenceService;
-    private final MeterRegistry meterRegistry;
-
+    // 【修改】移除 TradePersistenceService 依赖，引擎只负责内存计算
+    // private final TradePersistenceService tradePersistenceService;
     @Value("${matching.zero-share-enable:false}")
     private boolean zeroShareEnable;
+
+    private final MeterRegistry meterRegistry;
 
     /*增加监测指标*/
     private Counter tradeTotalCounter;
@@ -150,15 +154,16 @@ public class MatchingEngine {
      * 主动撮合：指定股票的存量订单（修复部分成交逻辑+成交记录插入+事务保障）
      * 如果希望主动对已有OrderBook中的订单进行一次完整撮合，可以调用。
      */
-    public void matchOrderBookOrders(String securityId) {
+    public List<RecoveryMatchResult> matchOrderBookOrders(String securityId) {
         log.info("开始主动撮合股票[{}]的存量订单", securityId);
+        List<RecoveryMatchResult> allResults = new ArrayList<>();
 
         ConcurrentSkipListMap<BigDecimal, Queue<Order>> buyPriceMap = orderBook.getPriceMap(securityId, SideEnum.BUY);
         ConcurrentSkipListMap<BigDecimal, Queue<Order>> sellPriceMap = orderBook.getPriceMap(securityId, SideEnum.SELL);
 
         if (buyPriceMap.isEmpty() || sellPriceMap.isEmpty()) {
             log.info("股票[{}]订单簿无匹配的买卖订单，跳过主动撮合", securityId);
-            return;
+            return allResults;
         }
 
         // 遍历买单（价格降序）
@@ -190,7 +195,8 @@ public class MatchingEngine {
                 }
 
                 // 调用支持零股开关的撮合方法
-                matchOrderPairWithPartialFill(buyQueue, sellQueue, securityId);
+                List<RecoveryMatchResult> batchResults = matchOrderPairWithPartialFill(buyQueue, sellQueue, securityId);
+                allResults.addAll(batchResults);
 
                 if (sellQueue.isEmpty()) {
                     sellIterator.remove();
@@ -206,6 +212,7 @@ public class MatchingEngine {
         }
 
         log.info("股票[{}]存量订单主动撮合完成", securityId);
+        return allResults;
     }
 
     /**
@@ -230,8 +237,9 @@ public class MatchingEngine {
     /**
      * 更新成交记录和订单记录，原子操作。
      */
-    @Transactional(rollbackFor = Exception.class) // 新增：事务注解，保障主动撮合的原子性
-    public void matchOrderPairWithPartialFill(Queue<Order> buyQueue, Queue<Order> sellQueue, String securityId) {
+//    @Transactional(rollbackFor = Exception.class) // 新增：事务注解，保障主动撮合的原子性
+    public List<RecoveryMatchResult> matchOrderPairWithPartialFill(Queue<Order> buyQueue, Queue<Order> sellQueue, String securityId) {
+        List<RecoveryMatchResult> results = new ArrayList<>();
         while (!buyQueue.isEmpty() && !sellQueue.isEmpty()) {
             Order buyOrder = buyQueue.peek();
             Order sellOrder = sellQueue.peek();
@@ -279,16 +287,37 @@ public class MatchingEngine {
                 sellOrder.setStatus(OrderStatusEnum.PART_FILLED);
             }
 
-            // 持久化更新
-            tradePersistenceService.updateOrder(buyOrder);
-            tradePersistenceService.updateOrder(sellOrder);
-            // 核心新增：更新成交记录
-            tradePersistenceService.insertTradeRecord(buyOrder, sellOrder, tradeQty, matchPrice);
+            Trade trade = new Trade();
+            trade.setExecId(TradeResponseHelper.generateExecId());
+            trade.setExecQty(tradeQty);
+            trade.setExecPrice(matchPrice);
+            trade.setTradeTime(LocalDateTime.now());
+            trade.setMarket(securityId); // 假设 market 就是 securityId 或者从 order 获取
+            trade.setSecurityId(securityId);
+            // 填充买卖方ID
+            if (buyOrder.getSide() == SideEnum.BUY) {
+                trade.setBuyClOrderId(buyOrder.getClOrderId());
+                trade.setSellClOrderId(sellOrder.getClOrderId());
+                trade.setBuyShareholderId(buyOrder.getShareholderId());
+                trade.setSellShareholderId(sellOrder.getShareholderId());
+            }
+
+            results.add(new RecoveryMatchResult(buyOrder, sellOrder, trade));
 
             log.info("主动撮合成交：买单[{}] vs 卖单[{}] | 股票[{}] | 价格[{}] | 成交数量[{}] | 零股开关：{}",
                     buyOrder.getClOrderId(), sellOrder.getClOrderId(), securityId, matchPrice, tradeQty,
                     zeroShareEnable);
         }
+        return results;
+    }
+
+    // 这是一个简单的数据载体类，用于在恢复阶段传递“内存撮合的成果”
+    @Data
+    @AllArgsConstructor
+    public static class RecoveryMatchResult {
+        private Order buyOrder;
+        private Order sellOrder;
+        private Trade trade;
     }
 
     /**
@@ -328,5 +357,12 @@ public class MatchingEngine {
         }
 
         return removeSuccess;
+    }
+
+    /**
+     * 新增：暴露订单簿实例给对账服务
+     */
+    public OrderBook getOrderBook() {
+        return this.orderBook;
     }
 }
