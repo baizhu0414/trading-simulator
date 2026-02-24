@@ -187,13 +187,20 @@ std::vector<model::Order> MySQLPersistence::loadUnfinishedOrders(const std::stri
         
         executeSQL(sql.str());
         
-        MYSQL_RES* result = mysql_store_result(connection_.get());
+        // 使用 RAII 包装器自动管理资源
+        struct ResultDeleter {
+            void operator()(MYSQL_RES* res) const {
+                if (res) mysql_free_result(res);
+            }
+        };
+        std::unique_ptr<MYSQL_RES, ResultDeleter> result(mysql_store_result(connection_.get()));
+        
         if (!result) {
             throw std::runtime_error(std::string("Failed to get result: ") + mysql_error(connection_.get()));
         }
         
         MYSQL_ROW row;
-        while ((row = mysql_fetch_row(result))) {
+        while ((row = mysql_fetch_row(result.get()))) {
             model::Order order;
             order.clOrderId = row[0] ? row[0] : "";
             order.shareholderId = row[1] ? row[1] : "";
@@ -209,7 +216,7 @@ std::vector<model::Order> MySQLPersistence::loadUnfinishedOrders(const std::stri
             orders.push_back(order);
         }
         
-        mysql_free_result(result);
+        // result 会在作用域结束时自动释放
         
         std::cout << "[MySQLPersistence] Loaded " << orders.size() 
                   << " unfinished orders for security: " << securityId << std::endl;
@@ -283,15 +290,14 @@ void MySQLPersistence::updateOrders(const std::vector<model::Order>& orders) {
 
 void MySQLPersistence::ensureTablesExist() {
     try {
-        // 创建数据库 (与 Java 端保持一致)
-        std::string createDatabase = R"(
-            CREATE DATABASE IF NOT EXISTS trading_db
-            DEFAULT CHARACTER SET utf8mb4
-            DEFAULT COLLATE utf8mb4_unicode_ci
-        )";
+        // 创建数据库 (使用连接字符串中指定的数据库名)
+        std::string createDatabase = 
+            "CREATE DATABASE IF NOT EXISTS `" + escapeString(database_) + "` "
+            "DEFAULT CHARACTER SET utf8mb4 "
+            "DEFAULT COLLATE utf8mb4_unicode_ci";
         
         executeSQL(createDatabase);
-        executeSQL("USE trading_db");
+        executeSQL("USE `" + escapeString(database_) + "`");
         
         // 创建订单表 (完全匹配 Java 端的 t_exchange_order)
         std::string createOrdersTable = R"(
