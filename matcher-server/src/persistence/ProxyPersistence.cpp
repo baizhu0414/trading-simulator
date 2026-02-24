@@ -3,6 +3,7 @@
 #include "model/Trade.h"
 #include "ipc/IPCServer.h"
 #include <nlohmann/json.hpp>
+#include <chrono>
 #include <iostream>
 
 using json = nlohmann::json;

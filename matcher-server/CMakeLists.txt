@@ -12,6 +12,11 @@ project(MatcherServer VERSION 0.1.0 LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+# Ensure MSVC compiles source files as UTF-8 to avoid C4819/C2001 errors
+if(MSVC)
+    add_compile_options(/utf-8)
+endif()
+
 # 自动处理 vcpkg 依赖
 # 注意：使用 Manifest 模式时，find_package 会自动找到 vcpkg 安装的库
 
@@ -39,8 +44,9 @@ include_directories(include)
 
 # 1. 核心库 (Core Library) - 将逻辑与 main 分离，方便测试
 add_library(matcher_core
-    # src/core/OrderBook.cpp (文件不存在，暂时注释)
-    # src/core/MatchingEngine.cpp (后续添加)
+    src/core/OrderBook.cpp
+    src/core/MatchingEngine.cpp
+    src/logger/Logger.cpp
     src/ipc/HttpIPCServer.cpp
     src/persistence/MySQLPersistence.cpp
     src/persistence/ProxyPersistence.cpp
@@ -54,9 +60,18 @@ target_link_libraries(matcher_core PUBLIC
     unofficial::libmysql::libmysql # vcpkg 中 libmysql 暴露的 target
     httplib::httplib               # HTTP library target
 )
+# Link MySQL client as PUBLIC so its include directories propagate to executables
+target_link_libraries(matcher_core PUBLIC unofficial::libmysql::libmysql)
 # 2. 可执行文件 (Executable)
 add_executable(matcher_server src/main.cpp)
 target_link_libraries(matcher_server PRIVATE matcher_core)
+
+# Small standalone tests for Logger and MatchingEngine
+add_executable(logger_test tests/logger_test.cpp)
+target_link_libraries(logger_test PRIVATE matcher_core)
+
+add_executable(engine_test tests/engine_test.cpp)
+target_link_libraries(engine_test PRIVATE matcher_core)
 
 # 3. 测试 (Tests) - 暂时禁用，因为测试文件不存在
 # enable_testing()
