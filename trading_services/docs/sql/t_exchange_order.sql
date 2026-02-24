@@ -15,7 +15,7 @@ CREATE TABLE IF NOT EXISTS `t_exchange_order` (
                                     `security_id` varchar(6) NOT NULL COMMENT '股票代码',
                                     `side` varchar(1) NOT NULL COMMENT '买卖方向（仅B/S）',
                                     `qty` int UNSIGNED NOT NULL COMMENT '订单数量（无符号32位整数，≥0，支持零股）',
-                                    `original_qty` int UNSIGNED NOT NULL COMMENT '原始订单数量（创建时固定）'
+                                    `original_qty` int UNSIGNED NOT NULL COMMENT '原始订单数量（创建时固定）',
                                     `price` decimal(10,2) NOT NULL COMMENT '订单价格（避免浮点精度问题）',
                                     `status` varchar(20) NOT NULL COMMENT '订单状态',
                                     `create_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '订单创建时间',

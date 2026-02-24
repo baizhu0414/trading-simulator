@@ -250,4 +250,38 @@ public class OrderBook {
             log.info("股票[{}]的订单簿已清空", securityId);
         }
     }
+
+    // 在现有OrderBook类中新增以下方法
+    /**
+     * 根据订单号查询订单簿中的订单
+     * @param clOrderId 订单唯一编号
+     * @return 订单对象（不存在返回null）
+     */
+    public Order findOrderByClOrderId(String clOrderId) {
+        if (clOrderId == null || clOrderId.isEmpty()) {
+            log.error("订单号为空，无法查询订单");
+            return null;
+        }
+
+        // 遍历所有股票的订单簿
+        for (ConcurrentMap<SideEnum, ConcurrentSkipListMap<BigDecimal, Queue<Order>>> sideMap : orderBookMap.values()) {
+            // 遍历买卖方向
+            for (ConcurrentSkipListMap<BigDecimal, Queue<Order>> priceMap : sideMap.values()) {
+                // 遍历所有价格队列
+                for (Queue<Order> orderQueue : priceMap.values()) {
+                    // 匹配订单号
+                    Order matchOrder = orderQueue.stream()
+                            .filter(o -> clOrderId.equals(o.getClOrderId()))
+                            .findFirst()
+                            .orElse(null);
+                    if (matchOrder != null) {
+                        return matchOrder;
+                    }
+                }
+            }
+        }
+
+        log.warn("订单[{}]未在订单簿中找到", clOrderId);
+        return null;
+    }
 }

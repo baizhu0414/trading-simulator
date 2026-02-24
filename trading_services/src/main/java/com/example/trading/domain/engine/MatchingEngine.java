@@ -301,4 +301,32 @@ public class MatchingEngine {
             return newOrderPrice.compareTo(counterPrice) <= 0;
         }
     }
+
+    /**
+     * 处理撤单请求：原子性全量移除订单（修改版：不支持部分撤单）
+     * 保证与撮合逻辑的线程安全，避免并发竞态，只要校验通过直接全量移除订单
+     * @param order 待撤订单
+     * @return true=全量移除成功，false=移除失败
+     */
+    public boolean handleCancelOrder(Order order) {
+        String clOrderId = order.getClOrderId();
+        log.info("开始处理订单[{}]的全量撤单请求", clOrderId);
+
+        // 1. 校验订单是否在订单簿中
+        Order orderInBook = orderBook.findOrderByClOrderId(clOrderId);
+        if (orderInBook == null) {
+            log.warn("订单[{}]不在订单簿中，无法执行全量撤单", clOrderId);
+            return false;
+        }
+
+        // 2. 原子性全量从订单簿移除订单（无部分移除逻辑，直接移除整个订单）
+        boolean removeSuccess = orderBook.removeOrder(order);
+        if (removeSuccess) {
+            log.info("订单[{}]已从订单簿全量移除，撤单完成", clOrderId);
+        } else {
+            log.error("订单[{}]从订单簿全量移除失败", clOrderId);
+        }
+
+        return removeSuccess;
+    }
 }

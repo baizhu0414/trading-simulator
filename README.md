@@ -69,8 +69,9 @@ trading-simulator/
 ├── native-modules/
 │   ├── cpp/（端口 9001）
 │   │   └── matcher/        # C++ 高性能撮合
-│   └── python/（端口 9002）
+│   └── python/（端口 9002、9003）
 │       └── risk/           # Python 风控/原型
+│       └── market/
 ├── protocol/               # IPC协议/功能字段定义（JSON 示例、proto 草案）
 └── docs/                   # 任务书，周报模板
 ```
