@@ -13,8 +13,6 @@ public enum ErrorCodeEnum {
     SIDE_INVALID(3004, "买卖方向非法"),
     QTY_INVALID(3005, "订单数量非法"),
     PRICE_INVALID(3006, "订单价格非法"),
-    RISK_REJECT(3007, "风控拦截"),
-    MATCH_FAILED(3008, "撮合失败"),
     QTY_NOT_MULTIPLE_100(3009, "订单数量非法（必须是100的整数倍）"),
     SELF_TRADE(3011, "对敲风险"),
     ORDER_EXISTED(3012, "订单号已存在"),
@@ -23,7 +21,16 @@ public enum ErrorCodeEnum {
     DB_FIELD_LENGTH_EXCEED(4001, "数据库字段长度超限"),
     DB_UNIQUE_CONSTRAINT_VIOLATION(4002, "订单号重复（唯一约束违反）"),
     DB_CHECK_CONSTRAINT_VIOLATION(4003, "字段值违反数据库约束规则"),
-    DB_INSERT_FAILED(4004, "数据库插入失败（未知原因）");
+    DB_INSERT_FAILED(4004, "数据库插入失败（未知原因）"),
+
+    // 撤单错误
+    CANCEL_ORDER_EXISTED(5001, "撤单请求号已存在"),
+    ORIGIN_ORDER_NOT_EXIST(5002, "待撤原订单不存在"),
+    CANCEL_INFO_MISMATCH(5003, "撤单信息与原订单不匹配"),
+    ORDER_NOT_CANCELABLE(5004, "订单状态不可撤销"),
+    ORDER_NOT_IN_ORDER_BOOK(5005, "订单不在订单簿中，无法撤销"),
+    CANCEL_PROCESS_FAILED(5006, "订单撤销处理失败"),
+    DB_ERROR(9999, "系统内部错误");
 
     private final Integer code;
     private final String desc;

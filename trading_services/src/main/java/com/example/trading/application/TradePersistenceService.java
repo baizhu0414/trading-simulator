@@ -1,10 +1,7 @@
 package com.example.trading.application;
 
-import com.example.trading.application.response.BaseResponse;
 import com.example.trading.common.enums.OrderStatusEnum;
 import com.example.trading.common.enums.SideEnum;
-import com.example.trading.domain.engine.MatchingEngine;
-import com.example.trading.domain.engine.result.MatchingResult;
 import com.example.trading.domain.model.Order;
 import com.example.trading.domain.model.Trade;
 import com.example.trading.domain.risk.SelfTradeChecker;
@@ -13,12 +10,9 @@ import com.example.trading.mapper.TradeMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
-import java.util.ArrayList;
-import java.util.List;
 
 /**
  * 独立的成交/订单持久化服务（用于解耦 ExchangeService 和 MatchingEngine）
@@ -36,20 +30,20 @@ public class TradePersistenceService {
      * 主动撮合（recovery）
      */
     public void updateOrder(Order order) {
-        // 关键：乐观锁，先查询数据库中对手单的最新version
-        Order latestOrder = orderMapper.selectByClOrderId(order.getClOrderId()).orElse(null);
-        if (latestOrder != null) {
-            order.setVersion(latestOrder.getVersion()); // 同步最新version
-        }
-
+        // 1. 【核心修改】乐观锁的正确用法：直接用传入的 version 更新，数据库自己加 1
         int updateCount = orderMapper.updateById(order);
-        if (updateCount == 0) throw new RuntimeException("我方订单乐观锁冲突");
-
-        log.info("我方订单[{}]更新成功：状态={}, 剩余数量={}",
-                order.getClOrderId(), order.getStatus(), order.getQty());
-
-        // 完全成交时清理风控缓存
-        if (order.getStatus() == OrderStatusEnum.FULL_FILLED) {
+        // 2. 乐观锁失败处理
+        if (updateCount == 0) {
+            throw new RuntimeException("订单[" + order.getClOrderId() + "]乐观锁冲突，更新失败");
+        }
+        // 3. 【关键】同步内存对象的 version（如果后续还会用这个对象）
+        // 数据库里已经是 version + 1 了，内存对象也要跟上
+        order.setVersion(order.getVersion() + 1);
+        log.info("订单[{}]更新成功：状态={}, 剩余数量={}, 版本号={}",
+                order.getClOrderId(), order.getStatus(), order.getQty(), order.getVersion());
+        // 5. 风控缓存清理（补充 CANCELED）
+        if (order.getStatus() == OrderStatusEnum.FULL_FILLED
+                || order.getStatus() == OrderStatusEnum.CANCELED) {
             selfTradeChecker.removeCache(order.getShareholderId(), order.getSecurityId());
         }
     }

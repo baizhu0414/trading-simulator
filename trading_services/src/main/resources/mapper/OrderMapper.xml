@@ -108,8 +108,9 @@
         SELECT COUNT(1) > 0 FROM t_exchange_order WHERE cl_order_id = #{clOrderId}
     </select>
 
-    <!--    根据订单状态查询订单，比如加载未成交订单-->
-    <select id="selectByStatus" parameterType="com.example.trading.common.enums.OrderStatusEnum" resultMap="OrderResultMap">
-        SELECT * FROM t_exchange_order WHERE status = #{status,typeHandler=org.apache.ibatis.type.EnumOrdinalTypeHandler}
+    <select id="selectUnfinishedOrders" resultMap="OrderResultMap">
+        SELECT * FROM t_exchange_order
+        WHERE status IN (0, 2, 3, 4)
     </select>
+
 </mapper>

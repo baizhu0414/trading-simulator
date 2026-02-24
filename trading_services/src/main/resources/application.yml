@@ -17,6 +17,18 @@ spring:
       map-underscore-to-camel-case: true  # 下划线转驼峰（适配MySQL字段名）
       log-impl: org.apache.ibatis.logging.slf4j.Slf4jImpl  # 打印SQL日志（便于优化）
       default-enum-type-handler: org.apache.ibatis.type.EnumOrdinalTypeHandler # 枚举类型默认处理方式（可选）
+    # Redis 配置
+    redis:
+      host: localhost # Redis 服务器地址（本地测试用，生产改真实地址）
+      port: 6379 # Redis 端口（默认6379）
+      password: # Redis 密码（无密码则留空，生产必须设置）
+      database: 0 # 使用的数据库编号（默认0，可自定义）
+      timeout: 3000ms # 连接超时时间
+
+db:
+  persist:
+    retry:
+      count: 3 # 异步持久化重试次数
 
 # MyBatis分页插件配置（可选）
 pagehelper:
