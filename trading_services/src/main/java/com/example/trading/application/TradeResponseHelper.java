@@ -13,6 +13,7 @@ import com.example.trading.domain.model.Trade;
 import com.example.trading.domain.risk.SelfTradeChecker;
 import com.example.trading.mapper.OrderMapper;
 import com.example.trading.mapper.TradeMapper;
+import com.example.trading.util.ExecIdGenUtils;
 import lombok.NoArgsConstructor;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -27,10 +28,12 @@ import java.util.UUID;
 
 /**
  * 独立的交易对象构建辅助类（纯逻辑，无依赖，打破循环）
+ * 已弃用，功能混杂，将订单交易抽取到ExchangeService中。
  */
 @Slf4j
 @Component
 @RequiredArgsConstructor
+@Deprecated
 public class TradeResponseHelper {
 
     private final OrderMapper orderMapper;
@@ -112,7 +115,7 @@ public class TradeResponseHelper {
      */
     public Trade buildTrade(Order orderA, Order orderB, int tradeQty, BigDecimal tradePrice) {
         Trade trade = new Trade();
-        trade.setExecId(generateExecId());
+        trade.setExecId(ExecIdGenUtils.generateExecId());
         trade.setExecQty(tradeQty);
         trade.setExecPrice(tradePrice);
         trade.setTradeTime(LocalDateTime.now());
@@ -171,12 +174,4 @@ public class TradeResponseHelper {
         return tradeResponse;
     }
 
-    /**
-     * 生成12位execId（从 TradePersistenceService 抽离）
-     */
-    public static String generateExecId() {
-        String timestamp = String.valueOf(System.currentTimeMillis()).substring(4, 12);
-        String random = UUID.randomUUID().toString().replace("-", "").substring(0, 4).toUpperCase();
-        return timestamp + random;
-    }
 }

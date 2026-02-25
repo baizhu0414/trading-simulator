@@ -15,6 +15,7 @@ import com.example.trading.domain.model.Trade;
 import com.example.trading.domain.risk.SelfTradeChecker;
 import com.example.trading.domain.validation.OrderValidator;
 import com.example.trading.mapper.OrderMapper;
+import com.example.trading.util.ExecIdGenUtils;
 import com.example.trading.util.JsonUtils;
 import io.micrometer.core.annotation.Timed;
 import io.micrometer.core.instrument.Counter;
@@ -214,7 +215,7 @@ public class ExchangeService {
     // 辅助：构建单笔Trade对象
     public Trade buildTrade(Order orderA, Order orderB, int tradeQty, BigDecimal tradePrice) {
         Trade trade = new Trade();
-        trade.setExecId(TradeResponseHelper.generateExecId());
+        trade.setExecId(ExecIdGenUtils.generateExecId());
         trade.setExecQty(tradeQty);
         trade.setExecPrice(tradePrice);
         trade.setTradeTime(LocalDateTime.now());
