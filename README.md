@@ -1,4 +1,4 @@
-> - JAVA端新增测试样例，需要对应module的同学审核一下字段是否正确，并参考着进行测试： `trading-simulator\trading_services\docs\TestCase-系统核心功能测试案例.md`
+> - JAVA [README详细介绍了项目功能设计、相关测试案例等内容](trading_services/README.md)。
 > - C++
 > - Python
 
@@ -42,6 +42,7 @@
         <img src="./trading_services/docs/09-自定义指标监控.png" width="48%" />
         <img src="./trading_services/docs/09-2自定义表盘展示.png" width="48%" />
         </div>
+7. 安装Redis用于暂存数据库记录，便于失败重试。
 
 ## 1.2 C++（开发者补充）
 

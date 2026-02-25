@@ -7,6 +7,7 @@ import com.example.trading.domain.model.Trade;
 import com.example.trading.domain.risk.SelfTradeChecker;
 import com.example.trading.mapper.OrderMapper;
 import com.example.trading.mapper.TradeMapper;
+import com.example.trading.util.ExecIdGenUtils;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -16,10 +17,12 @@ import java.time.LocalDateTime;
 
 /**
  * 独立的成交/订单持久化服务（用于解耦 ExchangeService 和 MatchingEngine）
+ * 由于持久化功能抽离成单独线程池服务，此持久化类弃用。
  */
 @Slf4j
 @Service
 @RequiredArgsConstructor
+@Deprecated
 public class TradePersistenceService {
     private final OrderMapper orderMapper;
     private final TradeMapper tradeMapper;
@@ -57,7 +60,7 @@ public class TradePersistenceService {
         try {
             // 构建成交记录
             Trade trade = new Trade();
-            String execId = TradeResponseHelper.generateExecId();
+            String execId = ExecIdGenUtils.generateExecId();
             trade.setExecId(execId); // 生成12位execId
             trade.setExecQty(tradeQty);
             trade.setExecPrice(tradePrice);

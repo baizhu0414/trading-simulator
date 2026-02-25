@@ -1,12 +1,12 @@
 package com.example.trading.domain.engine;
 
-import com.example.trading.application.TradePersistenceService;
 import com.example.trading.application.TradeResponseHelper;
 import com.example.trading.domain.engine.result.MatchingResult;
 import com.example.trading.domain.model.Order;
 import com.example.trading.common.enums.OrderStatusEnum;
 import com.example.trading.common.enums.SideEnum;
 import com.example.trading.domain.model.Trade;
+import com.example.trading.util.ExecIdGenUtils;
 import io.micrometer.core.annotation.Timed;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -288,7 +288,7 @@ public class MatchingEngine {
             }
 
             Trade trade = new Trade();
-            trade.setExecId(TradeResponseHelper.generateExecId());
+            trade.setExecId(ExecIdGenUtils.generateExecId());
             trade.setExecQty(tradeQty);
             trade.setExecPrice(matchPrice);
             trade.setTradeTime(LocalDateTime.now());
