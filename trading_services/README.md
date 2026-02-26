@@ -128,6 +128,43 @@
 2. 风控Python
 3. 行情分析Python
 
+---
+### 2.6 项目部署 到远程服务器
+- [部署文档](./docs/11-Java模块部署步骤.md)
+```sql
+重点：由于服务器端口开放问题，访问前需要安装PuTTY通过SSH隧道实现访问。具体操作参考文档并从网络上查找配置方法。
+1. 配置网址、端口
+   打开 PuTTY，先填服务器基本信息
+   Host Name：129.211.187.179
+   Port：22
+   Connection type：SSH
+
+2. 添加需要访问的端口：Connection → SSH → Tunnels，每条都按下面填 → 点 Add
+   ① 映射项目端口 8081
+   Source port：8081
+   Destination：127.0.0.1:8081
+   → 点 Add
+   ② 映射 MySQL 监控 9104
+   Source port：9104
+   Destination：127.0.0.1:9104
+   → 点 Add
+   ③ 映射 Prometheus 9090
+   Source port：9090
+   Destination：127.0.0.1:9090
+   → 点 Add
+   ④ 映射 Grafana 3000
+   Source port：3000
+   Destination：127.0.0.1:3000
+   → 点 Add
+   添加完成显示：
+   L8081  127.0.0.1:8081
+   L9104  127.0.0.1:9104
+   L9090  127.0.0.1:9090
+   L3000  127.0.0.1:3000
+       
+3. 左边回到 Session
+点底部 Open → 输入账号密码
+```
 
 ---
 ## 工作小结
