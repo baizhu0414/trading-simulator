@@ -14,9 +14,9 @@
 ```bash
 # 1. 下载并解压
 cd /usr/local
-sudo wget https://dev.mysql.com/get/Downloads/MySQL-8.4/mysql-8.4.0-linux-glibc2.28-x86_64.tar.xz
-sudo tar -xvf mysql-8.4.0-linux-glibc2.28-x86_64.tar.xz
-sudo ln -s mysql-8.4.0-linux-glibc2.28-x86_64 mysql # 软连接
+wget https://dev.mysql.com/get/Downloads/MySQL-8.4/mysql-8.4.0-linux-glibc2.28-x86_64.tar.xz
+tar -xvf mysql-8.4.0-linux-glibc2.28-x86_64.tar.xz
+ln -s mysql-8.4.0-linux-glibc2.28-x86_64 mysql # 软连接
 
 # 2. 进入 MySQL 目录（请根据你实际存放的位置调整，假设在你家目录下）
 cd /home/group10/software/mysql-8.4.0-linux-glibc2.28-x86_64
@@ -29,6 +29,8 @@ A temporary password is generated for root@localhost: k,8)r/G/7Fuu
 # 3. 编写配置文件
 vi /home/group10/my.cnf
 填入下面内容：
+```
+```
 [mysqld]
 # 这里改成你解压 MySQL 的实际路径
 basedir=/home/group10/software/mysql-8.4.0-linux-glibc2.28-x86_64
@@ -45,7 +47,8 @@ character-set-server=utf8mb4
 socket=/tmp/mysql.sock
 default-character-set=utf8mb4
 
----
+```
+```
 # 4. 启动
 cd /home/group10/software/mysql-8.4.0-linux-glibc2.28-x86_64
 # 后台启动，并指定配置文件（路径配置了：'/home/group10/data/mysql/VM-0-3-rockylinux.err'）
@@ -267,7 +270,7 @@ echo "--- 1. 启动 Redis ---"
 sleep 1  # 短暂等待，避免服务启动冲突
 
 echo "--- 2. 启动 MySQL（后台运行，无日志刷屏） ---"
-/home/group10/software/mysql/bin/mysqld_safe --defaults-file=/home/group10/my.cnf > /dev/null 2>&1 &
+/home/group10/software/mysql/bin/mysqld_safe --defaults-file=/home/group10/software/mysql/my.cnf > /dev/null 2>&1 &
 sleep 3  # MySQL 启动稍慢，多等几秒
 
 echo "--- 3. 启动 Prometheus ---"
@@ -287,7 +290,7 @@ sleep 1
 
 echo "--- 6. 启动 Spring Boot 应用 ---"
 cd /home/group10/trading_services
-nohup java -jar trading-simulator-0.0.1-SNAPSHOT.jar > app.log 2>&1 &
+nohup java -jar trading-simulator-0.0.1-SNAPSHOT.jar > startup-error.log 2>&1 &
 
 echo "=== 所有服务启动完成！==="
 echo "日志查看路径："
@@ -353,7 +356,7 @@ pkill -f trading-simulator-0.0.1-SNAPSHOT.jar
 echo "--- 已停止 Spring Boot 应用 ---"
 
 # 停止 Grafana
-pkill -f grafana-server
+pkill -f grafana
 echo "--- 已停止 Grafana ---"
 
 # 停止 MySQL Exporter
@@ -365,7 +368,7 @@ pkill -f prometheus
 echo "--- 已停止 Prometheus ---"
 
 # 停止 MySQL
-pkill -f mysqld
+pkill -u group10 -f mysqld
 echo "--- 已停止 MySQL ---"
 
 # 停止 Redis
