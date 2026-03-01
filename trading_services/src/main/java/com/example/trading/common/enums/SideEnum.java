@@ -3,7 +3,7 @@ package com.example.trading.common.enums;
 import lombok.Getter;
 
 /**
- * 买卖方向枚举（适配B/S）
+ * 买卖方向枚举
  */
 @Getter
 public enum SideEnum {
@@ -19,7 +19,7 @@ public enum SideEnum {
     }
 
     /**
-     * 根据code获取枚举（适配MyBatis映射）
+     * 根据code获取枚举
      */
     public static SideEnum getByCode(String code) {
         for (SideEnum side : SideEnum.values()) {

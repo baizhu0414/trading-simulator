@@ -2,7 +2,6 @@ package com.example.trading.application.response;
 
 import com.example.trading.common.enums.ErrorCodeEnum;
 import lombok.AllArgsConstructor;
-import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 import lombok.experimental.SuperBuilder;

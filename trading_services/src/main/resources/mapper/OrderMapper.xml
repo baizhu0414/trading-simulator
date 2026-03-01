@@ -3,26 +3,26 @@
         "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
 
 <mapper namespace="com.example.trading.mapper.OrderMapper">
-    <!-- 通用结果映射（移除根节点的非法typeHandler标签，仅在resultMap/语句中指定） -->
+    <!-- 通用结果映射 -->
     <resultMap id="OrderResultMap" type="com.example.trading.domain.model.Order">
         <id column="id" property="id"/>
         <result column="cl_order_id" property="clOrderId"/>
         <result column="shareholder_id" property="shareholderId"/>
         <result column="market" property="market"/>
         <result column="security_id" property="securityId"/>
-        <!-- 直接指定自定义TypeHandler路径，无需根节点声明 -->
+
         <result column="side" property="side" typeHandler="com.example.trading.common.typehandler.SideEnumTypeHandler"/>
-        <!-- 新增 -->
+
         <result column="original_qty" property="originalQty"/>
         <result column="qty" property="qty"/>
         <result column="price" property="price"/>
-        <!--（从 0 开始）数OrderStatusEnum的枚举项-->
+
         <result column="status" property="status" typeHandler="org.apache.ibatis.type.EnumOrdinalTypeHandler"/>
         <result column="create_time" property="createTime"/>
         <result column="version" property="version"/>
     </resultMap>
 
-    <!-- 插入订单（返回自增主键） -->
+    <!-- 插入订单 -->
     <insert id="insert" parameterType="com.example.trading.domain.model.Order" useGeneratedKeys="true" keyProperty="id">
         INSERT INTO t_exchange_order (
         cl_order_id, shareholder_id, market, security_id,
@@ -55,20 +55,7 @@
         ORDER BY create_time ASC
     </select>
 
-    <!-- 替换原有selectByStatusIn，增加24小时超时过滤 -->
-    <select id="selectByStatusInAndCreateTimeAfter" parameterType="map" resultMap="OrderResultMap">
-        SELECT id, cl_order_id, shareholder_id, market, security_id,
-        side, original_qty, qty, price, status, create_time, version
-        FROM t_exchange_order
-        WHERE status IN
-        <foreach collection="statusList" item="status" open="(" separator="," close=")">
-            #{status,typeHandler=org.apache.ibatis.type.EnumOrdinalTypeHandler}
-        </foreach>
-        AND create_time >= #{expireTime}
-        ORDER BY create_time ASC
-    </select>
-
-    <!-- 更新订单（含乐观锁：version匹配才更新） -->
+    <!-- 更新订单 -->
     <update id="updateById" parameterType="com.example.trading.domain.model.Order">
         UPDATE t_exchange_order
         SET
@@ -78,7 +65,7 @@
         WHERE id = #{id} AND version = #{version} -- 乐观锁条件
     </update>
 
-    <!-- 批量更新订单（单语句实现，兼容所有 MySQL 配置） -->
+    <!-- 批量更新订单 -->
     <update id="batchUpdateById" parameterType="java.util.List">
         UPDATE t_exchange_order
         SET

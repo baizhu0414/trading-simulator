@@ -1,13 +1,12 @@
 package com.example.trading.application.response;
 
-import com.example.trading.common.enums.ResponseCodeEnum;
 import lombok.*;
 import lombok.experimental.SuperBuilder;
 
 import java.math.BigDecimal;
 
 /**
- * 撤单确认响应（对齐任务书3.7规范）
+ * 撤单确认响应
  */
 @Data
 @SuperBuilder
@@ -34,7 +33,7 @@ public class CancelConfirmResponse extends BaseResponse {
     /** 买卖方向 B/S */
     private String side;
 
-    /** 原订单总数量 */
+    /** 剩余订单数量，也就是取消订单数量，定义和Order保持一致 */
     private Integer qty;
 
     /** 原订单价格 */
@@ -43,63 +42,7 @@ public class CancelConfirmResponse extends BaseResponse {
     /** 累计成交数量 */
     private Integer cumQty;
 
-    /** 本次撤销数量 */
-    private Integer canceledQty;
-
-    /** 订单当前状态（通常为CANCELED或PARTIALLY_FILLED） */
+    /** 订单当前状态（通常为CANCELED或PART_FILLED） */
     private String orderStatus;
 
-
-    /**
-     * 构建成功响应（仅基础返回码）
-     */
-    public static CancelConfirmResponse buildSuccess() {
-        return CancelConfirmResponse.builder()
-                .code(ResponseCodeEnum.CANCEL_SUCCESS.getCode())
-                .msg(ResponseCodeEnum.CANCEL_SUCCESS.getDesc())
-                .build();
-    }
-
-    /**
-     * 构建完整撤单确认响应
-     */
-    public static CancelConfirmResponse buildSuccess(
-            String clOrderId,
-            String origClOrderId,
-            String market,
-            String securityId,
-            String shareholderId,
-            String side,
-            Integer orderQty,
-            BigDecimal orderPrice,
-            Integer cumQty,
-            Integer canceledQty,
-            String orderStatus) {
-
-        return CancelConfirmResponse.builder()
-                .code(ResponseCodeEnum.CANCEL_SUCCESS.getCode())
-                .msg(ResponseCodeEnum.CANCEL_SUCCESS.getDesc())
-                .clOrderId(clOrderId)
-                .origClOrderId(origClOrderId)
-                .market(market)
-                .securityId(securityId)
-                .shareholderId(shareholderId)
-                .side(side)
-                .qty(orderQty)
-                .price(orderPrice)
-                .cumQty(cumQty)
-                .canceledQty(canceledQty)
-                .orderStatus(orderStatus)
-                .build();
-    }
-
-    /**
-     * 计算剩余数量（可选增强）
-     */
-    public Integer getLeavesQty() {
-        if (qty == null || cumQty == null || canceledQty == null) {
-            return null;
-        }
-        return qty - cumQty - canceledQty;
-    }
 }

@@ -10,12 +10,12 @@ import org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler;
 import java.util.concurrent.Executor;
 import java.util.concurrent.ThreadPoolExecutor;
 
-// 新增线程池配置类（替代直接new ExecutorService）
+// 新增线程池配置类
 @Configuration
 @EnableAsync
 public class AsyncConfig {
     /**
-     * 数据库持久化线程池（核心：拒绝策略为CallerRunsPolicy，避免任务丢失）
+     * 数据库持久化线程池
      */
     @Bean("dbPersistenceExecutor")
     public Executor dbPersistenceExecutor() {
@@ -25,7 +25,7 @@ public class AsyncConfig {
         executor.setQueueCapacity(1000); // 足够大的队列，避免任务溢出
         executor.setKeepAliveSeconds(60);
         executor.setThreadNamePrefix("db-persist-");
-        // 关键：拒绝策略 - 队列满时由调用线程执行，绝不丢弃任务
+        // 拒绝策略 - 队列满时由调用线程执行，绝不丢弃任务
         executor.setRejectedExecutionHandler(new ThreadPoolExecutor.CallerRunsPolicy());
         // 初始化
         executor.initialize();
@@ -33,7 +33,7 @@ public class AsyncConfig {
     }
 
     /**
-     * 撮合线程池（同理，保证任务不丢失）
+     * 撮合线程池
      */
     @Bean("matchingExecutor")
     public Executor matchingExecutor() {

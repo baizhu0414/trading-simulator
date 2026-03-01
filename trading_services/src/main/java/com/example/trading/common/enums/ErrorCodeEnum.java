@@ -3,7 +3,7 @@ package com.example.trading.common.enums;
 import lombok.Getter;
 
 /**
- * 错误码枚举（适配拒绝响应）
+ * 错误码枚举
  */
 @Getter
 public enum ErrorCodeEnum {
@@ -17,7 +17,7 @@ public enum ErrorCodeEnum {
     SELF_TRADE(3011, "对敲风险"),
     ORDER_EXISTED(3012, "订单号已存在"),
 
-    // 新增：数据库相关错误码（精准区分）
+    // 数据库相关错误码
     DB_FIELD_LENGTH_EXCEED(4001, "数据库字段长度超限"),
     DB_UNIQUE_CONSTRAINT_VIOLATION(4002, "订单号重复（唯一约束违反）"),
     DB_CHECK_CONSTRAINT_VIOLATION(4003, "字段值违反数据库约束规则"),
@@ -40,7 +40,7 @@ public enum ErrorCodeEnum {
         this.desc = desc;
     }
 
-    // 新增：根据异常信息匹配错误码（核心解析逻辑）
+    // 根据异常信息匹配错误码
     public static ErrorCodeEnum matchDbError(Exception e) {
         String errorMsg = e.getMessage();
         if (errorMsg == null) {
@@ -50,11 +50,11 @@ public enum ErrorCodeEnum {
         if (errorMsg.contains("Data truncation") || errorMsg.contains("too long for column")) {
             return DB_FIELD_LENGTH_EXCEED;
         }
-        // 匹配唯一约束（cl_order_id重复）
+        // 匹配唯一约束
         if (errorMsg.contains("Duplicate entry") && errorMsg.contains("idx_cl_order_id")) {
             return DB_UNIQUE_CONSTRAINT_VIOLATION;
         }
-        // 匹配CHECK约束违反（比如market/side/qty等）
+        // 匹配CHECK约束违反
         if (errorMsg.contains("CHECK constraint failed") || errorMsg.contains("chk_")) {
             return DB_CHECK_CONSTRAINT_VIOLATION;
         }

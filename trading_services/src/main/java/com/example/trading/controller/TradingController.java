@@ -9,9 +9,6 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
-/**
- * 交易控制器（接口层）
- */
 @RestController
 @RequestMapping("/api/trading")
 @RequiredArgsConstructor
