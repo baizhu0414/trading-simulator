@@ -6,7 +6,7 @@ import org.apache.ibatis.annotations.Param;
 
 import java.util.List;
 
-@Mapper // <--- 必须加上，让 Spring 扫描到
+@Mapper
 public interface TradeMapper {
     /**
      * 插入成交记录
@@ -29,7 +29,7 @@ public interface TradeMapper {
     Trade selectByExecId(@Param("execId") String execId);
 
     /**
-     * 根据成交编号判断是否存在（幂等校验）
+     * 根据成交编号判断是否存在，唯一
      */
     int existsByExecId(@Param("execId") String execId);
 }

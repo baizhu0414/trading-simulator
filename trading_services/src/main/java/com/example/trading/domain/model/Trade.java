@@ -1,17 +1,20 @@
 package com.example.trading.domain.model;
 
 import lombok.Data;
+import lombok.EqualsAndHashCode;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 
 /**
- * 成交表实体（对应t_exchange_trade）
+ * 成交表实体
  * 每笔交易只生成一条交易记录，包含买卖双方的信息和成交信息。
  */
 @Data
+@EqualsAndHashCode(onlyExplicitlyIncluded = true)
 public class Trade {
     private Long id; // 自增主键
+    @EqualsAndHashCode.Include
     private String execId; // 成交唯一编号（12位）
     private String buyClOrderId; // 买方订单ID
     private String sellClOrderId; // 卖方订单ID

@@ -11,6 +11,9 @@ import com.example.trading.domain.validation.OrderValidator;
 import com.example.trading.mapper.OrderMapper;
 import com.github.pagehelper.PageHelper;
 import com.github.pagehelper.PageInfo;
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.MeterRegistry;
+import jakarta.annotation.PostConstruct;
 import jakarta.annotation.Resource;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -27,7 +30,7 @@ import java.util.*;
 import java.util.stream.Collectors;
 
 /**
- * 订单崩溃恢复服务（MyBatis版，适配NOT_FILLED状态+优化统计逻辑）
+ * 订单崩溃恢复服务
  */
 @Slf4j
 @Component
@@ -35,15 +38,15 @@ import java.util.stream.Collectors;
 public class OrderRecoveryService implements CommandLineRunner {
     private final OrderMapper orderMapper;
     private final OrderBook orderBook;
-    private final MatchingEngine matchingEngine; // 新增：注入撮合引擎,新增恢复后主动撮合逻辑
+    private final MatchingEngine matchingEngine;
     private final SelfTradeChecker selfTradeChecker;
     private final OrderValidator orderValidator;
 
     @Value("${trading.recovery.enable:true}")
     private boolean recoveryEnable;
 
-    // 核心修改1：默认恢复状态加入NOT_FILLED（未成交订单需恢复）
-    @Value("${trading.recovery.recover-status:NEW,PROCESSING,MATCHING,NOT_FILLED,PART_FILLED}")
+    // 默认恢复状态加入NOT_FILLED
+    @Value("${trading.recovery.recover-status:PROCESSING,MATCHING,NOT_FILLED,PART_FILLED}")
     private String recoverStatus;
 
     @Value("${trading.recovery.batch-size:100}")
@@ -51,10 +54,34 @@ public class OrderRecoveryService implements CommandLineRunner {
 
     private final AsyncPersistService asyncPersistenceService;
 
+    private volatile boolean recoveryCompleted = false; // 防止一致性检测服务在应用刚启动时报错
+
+    public boolean isRecoveryCompleted() {
+        return recoveryCompleted;
+    }
+
     @Resource
     private PlatformTransactionManager transactionManager;
-    // 核心修改2：显式指定事务传播级别，增强可读性
+    // 显式指定事务传播级别，增强可读性
     private final TransactionDefinition transactionDefinition = new DefaultTransactionDefinition(TransactionDefinition.PROPAGATION_REQUIRED);
+
+    private final MeterRegistry meterRegistry;
+    /* 订单恢复任务执行失败次数计数器 */
+    private Counter recoveryTaskFailedCounter;
+    /* 订单恢复成功数量计数器 */
+    private Counter recoveryOrderSuccessCounter;
+    /* 订单恢复失败数量计数器 */
+    private Counter recoveryOrderFailCounter;
+    /* 恢复后主动撮合成交数量计数器 */
+    private Counter recoveryTradeTotalCounter;
+
+    @PostConstruct
+    public void initMetrics() {
+        recoveryTaskFailedCounter = meterRegistry.counter("trading.recovery.task.failed");
+        recoveryOrderSuccessCounter = meterRegistry.counter("trading.recovery.order.success");
+        recoveryOrderFailCounter = meterRegistry.counter("trading.recovery.order.fail");
+        recoveryTradeTotalCounter = meterRegistry.counter("trading.recovery.trade.total");
+    }
 
     @Override
     public void run(String... args) {
@@ -91,7 +118,7 @@ public class OrderRecoveryService implements CommandLineRunner {
             do {
                 PageHelper.startPage(pageNum, batchSize);
                 // 按订单状态查找，结合超时过滤功能
-                List<Order> batchOrders = orderMapper.selectByStatusInAndCreateTimeAfter(statusList, expireTime);
+                List<Order> batchOrders = orderMapper.selectByStatusIn(statusList);
                 orderPageInfo = new PageInfo<>(batchOrders);
 
                 if (pageNum == 1) {
@@ -110,6 +137,9 @@ public class OrderRecoveryService implements CommandLineRunner {
                 totalSkipped += batchResult.getSkipCount();
                 totalFailed += batchResult.getFailCount();
 
+                recoveryOrderSuccessCounter.increment(batchResult.getSuccessCount());
+                recoveryOrderFailCounter.increment(batchResult.getFailCount());
+
                 // 收集本批次的股票代码
                 batchOrders.forEach(order -> allRecoveredSecurities.add(order.getSecurityId()));
 
@@ -120,14 +150,12 @@ public class OrderRecoveryService implements CommandLineRunner {
                     totalRecovered + totalSkipped + totalFailed,
                     totalRecovered, totalSkipped, totalFailed);
 
-            // ========== 【核心修复】新增：全局主动撮合 ==========
             // 收集所有股票的撮合结果
             List<MatchingEngine.RecoveryMatchResult> allRecoveryResults = new ArrayList<>();
 
             for (String securityId : allRecoveredSecurities) {
                 try {
                     log.info("【订单恢复】开始主动撮合股票[{}]", securityId);
-                    // 【修改】接收撮合结果
                     List<MatchingEngine.RecoveryMatchResult> results = matchingEngine.matchOrderBookOrders(securityId);
                     allRecoveryResults.addAll(results);
                 } catch (Exception e) {
@@ -135,15 +163,18 @@ public class OrderRecoveryService implements CommandLineRunner {
                 }
             }
 
-            // 【修改】将所有收集到的撮合结果，一次性丢给异步线程去持久化
+            // 将所有收集到的撮合结果，一次性丢给异步线程去持久化
             if (!allRecoveryResults.isEmpty()) {
                 log.info("【订单恢复】内存撮合完成，产生{}笔成交，提交异步持久化...", allRecoveryResults.size());
+                recoveryTradeTotalCounter.increment(allRecoveryResults.size());
                 asyncPersistenceService.persistRecoveryResults(allRecoveryResults);
             }
 
         } catch (Exception e) {
+            recoveryTaskFailedCounter.increment();
             log.error("【订单恢复】全局异常", e);
         }
+        recoveryCompleted = true; // 用于延迟队长服务，防止应用重启后立刻报错。
     }
 
     /**
@@ -170,7 +201,7 @@ public class OrderRecoveryService implements CommandLineRunner {
     }
 
     /**
-     * 数据恢复（不包含撮合）。
+     * 数据恢复-》状态变更后此处记得修改，当前删除NEW已修改
      */
     public BatchResult processBatchOrders(List<Order> batchOrders) {
         int successCount = 0;
@@ -180,7 +211,7 @@ public class OrderRecoveryService implements CommandLineRunner {
         for (Order order : batchOrders) {
             TransactionStatus txStatus = transactionManager.getTransaction(transactionDefinition);
             try {
-                // 1. 超时订单直接跳过（双重校验，避免Mapper过滤失效）
+                // 1. 超时订单直接跳过——此逻辑已从数据库OrderMapper中删除，长期运行可以考虑添加。
                 if (order.getCreateTime().isBefore(LocalDateTime.now().minusHours(24))) {
                     log.info("【订单恢复】订单[{}]已超时（>24小时），跳过", order.getClOrderId());
                     skipCount++;
@@ -188,51 +219,40 @@ public class OrderRecoveryService implements CommandLineRunner {
                     continue;
                 }
 
-                // 2. 终态订单处理
+                // 2. 明确的终态：直接跳过 -》FULL_FILLED, RISK_REJECT, REJECTED, CANCELED
                 if (order.getStatus().isFinalStatus()) {
-                    if (order.getStatus() == OrderStatusEnum.NOT_FILLED) {
-                        // 未成交：直接入内存
-                        loadOrderToMemory(order);
-                        log.info("【订单恢复】订单[{}]（未成交）重新加入订单簿", order.getClOrderId());
-                        successCount++;
-                    } else {
-                        // 其他终态（REJECTED/FULL_FILLED等）：跳过
-                        log.info("【订单恢复】订单[{}]已是终态（{}），跳过", order.getClOrderId(), order.getStatus().getDesc());
-                        skipCount++;
-                    }
+                    log.info("【订单恢复】订单[{}]已是终态（{}），跳过", order.getClOrderId(), order.getStatus().getDesc());
+                    skipCount++;
                     transactionManager.commit(txStatus);
                     continue;
                 }
 
-                // 3. 非终态订单处理（PART_FILLED逻辑）
-                if (order.getStatus() == OrderStatusEnum.PROCESSING
-                        || order.getStatus() == OrderStatusEnum.MATCHING
-                        || order.getStatus() == OrderStatusEnum.PART_FILLED) {
-                    List<ErrorCodeEnum> validateErrors = orderValidator.validate(order);
-                    if (!validateErrors.isEmpty()) {
-                        log.warn("【订单恢复】订单[{}]校验失败，视为无效跳过", order.getClOrderId());
-                        skipCount++;
-                        transactionManager.commit(txStatus);
-                        continue;
-                    }
-
-                    // 强制重置状态（仅内存对象，不着急更新数据库，等会统一成交后由撮合逻辑更新更准确）
-                    if (order.getStatus() != OrderStatusEnum.PART_FILLED)
-                        order.setStatus(OrderStatusEnum.NOT_FILLED);
-
-                    // 加载进内存
-                    loadOrderToMemory(order);
-
-                    log.info("【订单恢复】订单[{}]（原状态：{}）重置为未成交并加入内存",
-                            order.getClOrderId(), order.getStatus().getDesc());
-                    successCount++;
+                // 3. 剩余状态：全部尝试恢复 -》PROCESSING, MATCHING, NOT_FILLED, PART_FILLED
+                List<ErrorCodeEnum> validateErrors = orderValidator.validate(order);
+                if (!validateErrors.isEmpty()) {
+                    log.warn("【订单恢复】订单[{}]校验失败，视为无效跳过", order.getClOrderId());
+                    skipCount++;
+                    transactionManager.commit(txStatus);
+                    continue;
                 }
+
+                OrderStatusEnum originalStatus = order.getStatus();
+                if (originalStatus == OrderStatusEnum.PROCESSING || originalStatus == OrderStatusEnum.MATCHING) {
+                    order.setStatus(OrderStatusEnum.NOT_FILLED);
+                }
+
+                // 加载进内存
+                loadOrderToMemory(order);
+
+                log.info("【订单恢复】订单[{}]恢复成功（原状态：{} -> 现状态：{}）",
+                        order.getClOrderId(), originalStatus.getDesc(), order.getStatus().getDesc());
+                successCount++;
 
                 transactionManager.commit(txStatus);
 
             } catch (Exception e) {
                 transactionManager.rollback(txStatus);
-                log.error("【订单恢复】订单[{}]失败", order.getClOrderId(), e);
+                log.error("【订单恢复】订单[{}]恢复异常", order.getClOrderId(), e);
                 failCount++;
             }
         }
@@ -242,17 +262,17 @@ public class OrderRecoveryService implements CommandLineRunner {
     }
 
     /**
-     * 辅助方法：统一加载内存（OrderBook + 风控缓存）
+     * 辅助方法：统一加载内存
      */
     private void loadOrderToMemory(Order order) {
         // 1. 加入订单簿
         orderBook.addOrder(order);
-        // 2. 补填风控缓存（防止恢复后新订单进来无法识别对敲）
+        // 2. 补填风控缓存
         selfTradeChecker.putCache(order);
     }
 
     /**
-     * 核心修改5：扩展BatchResult，拆分skipCount（独立统计）
+     * 扩展BatchResult，拆分skipCount
      */
     private static class BatchResult {
         private final int successCount;

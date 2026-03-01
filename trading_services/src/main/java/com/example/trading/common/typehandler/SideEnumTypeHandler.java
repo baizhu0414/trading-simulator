@@ -12,7 +12,7 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 
 /**
- * 买卖方向枚举类型处理器（适配数据库B/S ↔ Java SideEnum）
+ * 买卖方向枚举类型处理器，适配数据库B/S ↔ Java SideEnum
  */
 @MappedTypes(SideEnum.class) // 映射Java枚举类型
 @MappedJdbcTypes(JdbcType.VARCHAR) // 映射数据库VARCHAR类型

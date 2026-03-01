@@ -1,6 +1,5 @@
 package com.example.trading.application.response;
 
-import com.example.trading.common.enums.OrderStatusEnum;
 import lombok.*;
 import lombok.experimental.SuperBuilder;
 
@@ -10,7 +9,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * 成交回报（任务书3.6节格式）（部分/完全成交时返回）
+ * 成交回报,包括：部分/完全成交时返回
  */
 @Data
 @SuperBuilder

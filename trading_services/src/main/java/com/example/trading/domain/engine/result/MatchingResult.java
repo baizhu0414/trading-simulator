@@ -12,7 +12,7 @@ import lombok.Builder;
 import java.util.ArrayList;
 
 /**
- * 撮合结果封装类(1:n的对应结构进行订单撮合)
+ * 撮合结果封装类，1:n的对应结构进行订单撮合，也就是多轮撮合。
  */
 
 
@@ -21,11 +21,11 @@ import java.util.ArrayList;
 @NoArgsConstructor
 @AllArgsConstructor
 public class MatchingResult {
-    private Order matchedOrder; // 当前订单（撮合后更新剩余数量）
+    private Order matchedOrder; // 当前订单
     @Builder.Default
     private List<MatchCounterDetail> matchDetails = new ArrayList<>(); // 所有匹配细节列表
 
-    // 【核心优化】单笔匹配细节封装，避免多List索引错位
+    // 单笔匹配细节封装，避免多List索引错位
     @Data
     @AllArgsConstructor
     @NoArgsConstructor

@@ -55,18 +55,6 @@ public class JsonUtils {
         }
     }
 
-    public static <T> T fromJson(String json, TypeToken<T> typeToken) {
-        if (json == null || json.isEmpty() || "{}".equals(json)) {
-            return null;
-        }
-        try {
-            return GSON.fromJson(json, typeToken.getType());
-        } catch (JsonSyntaxException e) {
-            logError("JSON解析失败：{}，内容：{}", e.getMessage(), json);
-            return null;
-        }
-    }
-
     private static void logError(String msg, Object... args) {
         System.err.printf("[JsonUtils] " + msg + "%n", args);
     }

@@ -10,7 +10,7 @@ import java.io.Serializable;
 import java.time.LocalDateTime;
 
 /**
- * 撤单请求领域模型（对齐任务书3.2规范）
+ * 撤单请求领域模型
  */
 @Data
 @Builder
