@@ -25,6 +25,11 @@ namespace ipc {
 class StdioIPCServer : public IPCServer {
 private:
     std::function<void(model::Order)> orderCallback_;
+    std::function<std::vector<model::Trade>(
+        const std::string&,
+        const std::string&,
+        const std::vector<model::Order>&,
+        const std::vector<model::Order>&)> matchCallback_;
     std::atomic<bool> running_{false};
     std::unique_ptr<std::thread> ioThread_;
     std::mutex outputMutex_;
@@ -73,12 +78,29 @@ public:
     }
     
     /**
+     * @brief 设置批量撮合回调函数
+     */
+    virtual void setMatchCallback(
+        std::function<std::vector<model::Trade>(
+            const std::string&,
+            const std::string&,
+            const std::vector<model::Order>&,
+            const std::vector<model::Order>&)> callback) override {
+        matchCallback_ = std::move(callback);
+    }
+    
+    /**
      * @brief 发送成交回报
      */
     virtual bool sendExecutionReport(const model::Trade& trade) override {
         try {
             json j;
             j["type"] = "EXECUTION_REPORT";
+            
+            // 将时间戳转换为毫秒数
+            auto timestampMs = std::chrono::duration_cast<std::chrono::milliseconds>(
+                trade.timestamp.time_since_epoch()).count();
+            
             j["data"] = {
                 {"tradeId", trade.tradeId},
                 {"clOrderIdBuy", trade.clOrderIdBuy},
@@ -86,7 +108,7 @@ public:
                 {"securityId", trade.securityId},
                 {"price", trade.price},
                 {"quantity", trade.quantity},
-                {"timestamp", trade.timestamp}
+                {"timestamp", timestampMs}
             };
             
             std::lock_guard<std::mutex> lock(outputMutex_);
@@ -137,14 +159,21 @@ private:
                     model::Order order;
                     
                     // 解析订单字段
-                    order.clOrderId = data["clOrderId"];
-                    order.securityId = data["securityId"];
-                    order.side = data["side"];
-                    order.price = data["price"];
-                    order.quantity = data["quantity"];
-                    order.orderType = data["orderType"];
-                    order.timeInForce = data["timeInForce"];
-                    order.timestamp = data["timestamp"];
+                    order.clOrderId = data["clOrderId"].get<std::string>();
+                    order.securityId = data["securityId"].get<std::string>();
+                    order.side = data["side"].get<std::string>();
+                    order.price = data["price"].get<double>();
+                    order.qty = data["quantity"].get<int>();
+                    order.originalQty = order.qty; // 设置原始数量
+                    order.orderType = data["orderType"].get<std::string>();
+                    order.timeInForce = data["timeInForce"].get<std::string>();
+                    // 时间戳需要特殊处理，假设JSON中是字符串或数字
+                    if (data.contains("timestamp")) {
+                        // 假设时间戳是毫秒数
+                        auto timestampMs = data["timestamp"].get<int64_t>();
+                        order.timestamp = std::chrono::system_clock::time_point(
+                            std::chrono::milliseconds(timestampMs));
+                    }
                     
                     // 调用订单回调
                     orderCallback_(std::move(order));

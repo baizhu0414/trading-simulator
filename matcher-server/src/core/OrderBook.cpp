@@ -2,6 +2,7 @@
 #include <algorithm>
 #include <chrono>
 #include <sstream>
+#include <iostream>
 
 namespace matcher {
 namespace core {
@@ -13,6 +14,57 @@ std::vector<Trade> OrderBook::submit(const Order& order) {
     // Copy order to modify local qty
     Order o = order;
     return matchAgainst(std::move(o));
+}
+
+void OrderBook::addOrder(const Order& order) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    
+    if (order.qty <= 0) {
+        std::cerr << "订单数量非法，无法添加到订单簿: " << order.clOrderId << std::endl;
+        return;
+    }
+
+    // 添加到对应的价格队列
+    if (order.side == "B") {
+        buyOrders_[order.price].push_back(order);
+    } else if (order.side == "S") {
+        sellOrders_[order.price].push_back(order);
+    } else {
+        std::cerr << "订单方向非法: " << order.side << std::endl;
+    }
+}
+
+std::map<double, std::vector<Order>, std::greater<double>>& OrderBook::getBuyPriceMap() {
+    return buyOrders_;
+}
+
+std::map<double, std::vector<Order>>& OrderBook::getSellPriceMap() {
+    return sellOrders_;
+}
+
+bool OrderBook::removeOrder(const Order& order) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    
+    auto remove_from_map = [&](auto& m) -> bool {
+        for (auto it = m.begin(); it != m.end(); ++it) {
+            auto& vec = it->second;
+            auto vit = std::find_if(vec.begin(), vec.end(), 
+                                   [&](const Order& o){ return o.clOrderId == order.clOrderId; });
+            if (vit != vec.end()) {
+                vec.erase(vit);
+                if (vec.empty()) m.erase(it);
+                return true;
+            }
+        }
+        return false;
+    };
+
+    if (order.side == "B") {
+        return remove_from_map(buyOrders_);
+    } else if (order.side == "S") {
+        return remove_from_map(sellOrders_);
+    }
+    return false;
 }
 
 bool OrderBook::cancel(const std::string& clOrderId) {
@@ -52,12 +104,12 @@ std::vector<Trade> OrderBook::matchAgainst(Order order) {
 
     bool isBuy = (order.side == "B");
 
-    // Simple limit-order matching: price-time priority
+    // 简单限价单撮合逻辑：价格-时间优先原则
     if (isBuy) {
-        // Match against lowest-price sell orders
+        // 匹配最低价格的卖单
         for (auto sit = sellOrders_.begin(); sit != sellOrders_.end() && order.qty > 0; ) {
             double sellPrice = sit->first;
-            if (order.price < sellPrice) break; // no match
+            if (order.price < sellPrice) break; // 无法撮合
 
             auto& vec = sit->second;
             for (auto vit = vec.begin(); vit != vec.end() && order.qty > 0; ) {
@@ -65,7 +117,7 @@ std::vector<Trade> OrderBook::matchAgainst(Order order) {
                 int64_t execQty = std::min<int64_t>(order.qty, sellOrder.qty);
                 if (execQty <= 0) { ++vit; continue; }
 
-                // make trade
+                // 创建成交记录
                 auto now = std::chrono::system_clock::now();
                 Trade t;
                 t.tradeId = "T" + std::to_string(std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count());
@@ -78,7 +130,7 @@ std::vector<Trade> OrderBook::matchAgainst(Order order) {
 
                 trades.push_back(t);
 
-                // update quantities
+                // 更新成交数量
                 order.qty -= static_cast<int>(execQty);
                 sellOrder.qty -= static_cast<int>(execQty);
 

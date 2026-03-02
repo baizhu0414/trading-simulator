@@ -1,3 +1,12 @@
-[SYS] [logger_test] System message example
-[ERROR] [logger_test] An example error
-[TRACE] [test_op] duration=42ms
+2026-03-02 18:50:27.979 [SYS] [logger_test] System message example
+2026-03-02 18:50:27.979 [ERROR] [logger_test] An example error
+2026-03-02 18:50:27.979 [TRACE] [test_op] duration=42ms
+2026-03-02 18:56:15.515 [SYS] [logger_test] System message example
+2026-03-02 18:56:15.515 [ERROR] [logger_test] An example error
+2026-03-02 18:56:15.515 [TRACE] [test_op] duration=42ms
+2026-03-02 18:56:32.035 [SYS] [MatchingEngine::matchBatch] 开始批量撮合: 市场=XSHG, 证券=600001, 买单数量=1, 卖单数量=1
+2026-03-02 18:56:32.035 [SYS] [MatchingEngine::matchBatch] 批量撮合完成: 生成1笔成交
+2026-03-02 18:56:32.035 [SYS] [MatchingEngine::matchBatch] 批量撮合处理完成
+2026-03-02 19:12:33.640 [SYS] [MatchingEngine::matchBatch] 开始批量撮合: 市场=XSHG, 证券=600001, 买单数量=1, 卖单数量=1
+2026-03-02 19:12:33.640 [SYS] [MatchingEngine::matchBatch] 批量撮合完成: 生成1笔成交
+2026-03-02 19:12:33.641 [SYS] [MatchingEngine::matchBatch] 批量撮合处理完成

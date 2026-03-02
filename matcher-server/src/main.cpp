@@ -64,13 +64,13 @@ Config parseArguments(int argc, char* argv[]) {
         } else if (strcmp(argv[i], "--verbose") == 0 || strcmp(argv[i], "-v") == 0) {
             config.verbose = true;
         } else if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0) {
-            std::cout << "Usage: " << argv[0] << " [options]\n";
-            std::cout << "Options:\n";
-            std::cout << "  --mode <TEST|PRODUCTION>   Run mode (default: TEST)\n";
-            std::cout << "  --mysql <url>              MySQL connection string\n";
-            std::cout << "  --ipc <config>             IPC config (default: stdio)\n";
-            std::cout << "  --verbose, -v              Verbose logging\n";
-            std::cout << "  --help, -h                 Show help\n";
+            std::cout << "用法: " << argv[0] << " [options]\n";
+            std::cout << "选项:\n";
+            std::cout << "  --mode <TEST|PRODUCTION>   运行模式 (默认: TEST)\n";
+            std::cout << "  --mysql <url>              MySQL连接字符串\n";
+            std::cout << "  --ipc <config>             IPC配置 (默认: stdio)\n";
+            std::cout << "  --verbose, -v              详细日志输出\n";
+            std::cout << "  --help, -h                 显示帮助\n";
             std::exit(0);
         }
     }
@@ -110,11 +110,11 @@ bool initLogger(const Config& config) {
     ;
     std::string logConfig = lcfg.str();
     
-    // Ensure logs directory exists
+    // 确保日志目录存在
     try {
         std::filesystem::create_directories("logs");
     } catch (...) {
-        std::cerr << "[Init] Failed to create logs directory\n";
+        std::cerr << "[Init] 创建日志目录失败\n";
         return false;
     }
 
