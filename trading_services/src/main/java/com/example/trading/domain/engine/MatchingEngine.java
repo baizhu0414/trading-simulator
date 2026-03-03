@@ -279,7 +279,7 @@ public class MatchingEngine {
             trade.setExecQty(tradeQty);
             trade.setExecPrice(matchPrice);
             trade.setTradeTime(LocalDateTime.now());
-            trade.setMarket(securityId);
+            trade.setMarket(buyOrder.getMarket());
             trade.setSecurityId(securityId);
             if (buyOrder.getSide() == SideEnum.BUY) {
                 trade.setBuyClOrderId(buyOrder.getClOrderId());

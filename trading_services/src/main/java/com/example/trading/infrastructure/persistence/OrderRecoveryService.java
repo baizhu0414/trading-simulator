@@ -212,12 +212,12 @@ public class OrderRecoveryService implements CommandLineRunner {
             TransactionStatus txStatus = transactionManager.getTransaction(transactionDefinition);
             try {
                 // 1. 超时订单直接跳过——此逻辑已从数据库OrderMapper中删除，长期运行可以考虑添加。
-                if (order.getCreateTime().isBefore(LocalDateTime.now().minusHours(24))) {
-                    log.info("【订单恢复】订单[{}]已超时（>24小时），跳过", order.getClOrderId());
-                    skipCount++;
-                    transactionManager.commit(txStatus);
-                    continue;
-                }
+//                if (order.getCreateTime().isBefore(LocalDateTime.now().minusHours(24))) {
+//                    log.info("【订单恢复】订单[{}]已超时（>24小时），跳过", order.getClOrderId());
+//                    skipCount++;
+//                    transactionManager.commit(txStatus);
+//                    continue;
+//                }
 
                 // 2. 明确的终态：直接跳过 -》FULL_FILLED, RISK_REJECT, REJECTED, CANCELED
                 if (order.getStatus().isFinalStatus()) {

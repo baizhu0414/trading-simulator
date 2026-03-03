@@ -73,8 +73,3 @@ management:
     metrics:
       export:
         enabled: true
-
-# 自定义监控指标前缀
-micrometer:
-  metrics:
-    prefix: trading
