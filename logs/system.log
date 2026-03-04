@@ -1,3 +1,0 @@
-[SYS] [logger_test] System message example
-[ERROR] [logger_test] An example error
-[TRACE] [test_op] duration=42ms
