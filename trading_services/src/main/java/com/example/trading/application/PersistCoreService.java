@@ -8,12 +8,16 @@ import com.example.trading.mapper.OrderMapper;
 import com.example.trading.mapper.TradeMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.ArrayList;
 import java.util.List;
 
+/**
+ * 持久化任务落库
+ */
 @Slf4j
 @Service
 @RequiredArgsConstructor
@@ -36,15 +40,15 @@ public class PersistCoreService {
         allOrders.add(matchedOrder);
         allOrders.addAll(counterOrders);
 
-        orderMapper.batchUpdateById(allOrders);
-        log.info("[事务] 订单[{}] 持久化完成", clOrderId);
+        allOrders.forEach(o -> {
+            if (o.getVersion() == null) o.setVersion(0);
+        });
 
-        for (Order o : allOrders) {
-            if (o.getStatus().isFinalStatus()) {
-                selfTradeChecker.removeCache(o.getShareholderId(), o.getSecurityId());
-            }
-            o.setVersion(o.getVersion() + 1);
-        }
+        orderMapper.batchUpsert(allOrders);
+        log.info("[事务] 批量 Upsert {} 个订单完成", allOrders.size());
+
+        allOrders.forEach(o -> o.setVersion(o.getVersion() + 1)); // 先不删除，防止同一个人对同一股票有多个同方向订单
+        log.info("[事务] 订单[{}] 持久化完成", clOrderId);
     }
 
     @Transactional(rollbackFor = Exception.class)
@@ -83,9 +87,28 @@ public class PersistCoreService {
         String clOrderId = canceledOrder.getClOrderId();
         log.info("[事务] 开始持久化撤单[{}]", clOrderId);
 
-        int updateCount = orderMapper.updateById(canceledOrder);
+        int updateCount = 0;
+        try {
+            if (canceledOrder.getId() != null && canceledOrder.getVersion() != null) {
+                updateCount = orderMapper.updateById(canceledOrder);
+            }
+        } catch (Exception e) {
+            log.warn("[事务] 撤单更新尝试失败（可能订单未入库），准备 Upsert: {}", e.getMessage());
+        }
+
         if (updateCount == 0) {
-            throw new RuntimeException("撤单失败，乐观锁冲突");
+            log.info("[事务] 订单[{}]未在DB中找到或版本过期，执行 Upsert (Insert CANCELED)", clOrderId);
+
+            if (canceledOrder.getVersion() == null) {
+                canceledOrder.setVersion(0);
+            }
+
+            try {
+                orderMapper.insert(canceledOrder);
+            } catch (DuplicateKeyException dke) {
+                log.warn("[事务] 订单[{}]插入冲突（唯一索引），说明订单刚入库，执行强制 Update", clOrderId);
+                orderMapper.forceUpdateStatusByClOrderId(canceledOrder);
+            }
         }
 
         canceledOrder.setVersion(canceledOrder.getVersion() + 1);

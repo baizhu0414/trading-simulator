@@ -93,6 +93,12 @@
             <artifactId>spring-boot-starter-actuator</artifactId>
         </dependency>
 
+        <!-- AOP (for @Timed) 为了统计Prometheus的时间 -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-aop</artifactId>
+        </dependency>
+
         <!-- Micrometer（对接Prometheus） -->
         <dependency>
             <groupId>io.micrometer</groupId>
@@ -103,6 +109,12 @@
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-data-redis</artifactId>
+        </dependency>
+        <!-- 布隆过滤器，为避免查数据库，防止Redis膨胀，有要求大多数请求都查询到是否存在数据库中，使用-->
+        <dependency>
+            <groupId>com.google.guava</groupId>
+            <artifactId>guava</artifactId>
+            <version>32.1.3-jre</version>
         </dependency>
 
     </dependencies>

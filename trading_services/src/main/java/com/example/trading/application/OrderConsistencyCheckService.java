@@ -1,5 +1,6 @@
 package com.example.trading.application;
 
+import com.example.trading.common.enums.OrderStatusEnum;
 import com.example.trading.domain.engine.MatchingEngine;
 import com.example.trading.domain.engine.OrderBook;
 import com.example.trading.domain.model.Order;
@@ -10,11 +11,12 @@ import io.micrometer.core.instrument.MeterRegistry;
 import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
-import java.util.List;
-import java.util.Optional;
+import java.util.*;
+import java.util.stream.Collectors;
 
 /**
  * 订单数据一致性检查服务
@@ -42,6 +44,8 @@ public class OrderConsistencyCheckService {
     private final OrderMapper orderMapper;
     private final MatchingEngine matchingEngine;
     private final OrderRecoveryService orderRecoveryService;
+    @Value("${trading.recovery.recover-status:PROCESSING,MATCHING,NOT_FILLED,PART_FILLED}")
+    private String recoverStatus;
     private final MeterRegistry meterRegistry;
 
     private Counter checkTotalCounter;      // 检查任务执行总次数
@@ -75,8 +79,13 @@ public class OrderConsistencyCheckService {
 
         log.info("========== 开始执行订单数据一致性检查 ==========");
         try {
+            List<OrderStatusEnum> statusList = parseRecoverStatus(recoverStatus);
+            if (statusList.isEmpty()) {
+                log.info("检查任务：无有效恢复状态，检查通过");
+                return;
+            }
             // 2. 从数据库查询所有未完成订单
-            List<Order> dbUnfinishedOrders = orderMapper.selectUnfinishedOrders();
+            List<Order> dbUnfinishedOrders = orderMapper.selectByStatusIn(statusList);
             log.info("数据库中未完成订单数量：{}", dbUnfinishedOrders.size());
 
             if (dbUnfinishedOrders.isEmpty()) {
@@ -170,6 +179,24 @@ public class OrderConsistencyCheckService {
             sendAlarm("检查任务全局异常", "定时检查任务执行失败：" + e.getMessage());
             checkFailedCounter.increment();
         }
+    }
+
+    private List<OrderStatusEnum> parseRecoverStatus(String recoverStatusStr) {
+        if (recoverStatusStr == null || recoverStatusStr.isBlank()) {
+            return new ArrayList<>();
+        }
+        return Arrays.stream(recoverStatusStr.split(","))
+                .map(String::trim)
+                .filter(status -> !status.isBlank())
+                .map(status -> {
+                    try {
+                        return OrderStatusEnum.valueOf(status);
+                    } catch (IllegalArgumentException e) {
+                        return null;
+                    }
+                })
+                .filter(Objects::nonNull)
+                .collect(Collectors.toList());
     }
 
     /**

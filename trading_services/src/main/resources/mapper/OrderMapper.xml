@@ -22,7 +22,7 @@
         <result column="version" property="version"/>
     </resultMap>
 
-    <!-- 插入订单 -->
+    <!-- 插入订单，存在则更新 -->
     <insert id="insert" parameterType="com.example.trading.domain.model.Order" useGeneratedKeys="true" keyProperty="id">
         INSERT INTO t_exchange_order (
         cl_order_id, shareholder_id, market, security_id,
@@ -39,6 +39,30 @@
         status = VALUES(status),    <!-- 更新订单状态 -->
         version = version + 1       <!-- 乐观锁版本号自增 -->
     </insert>
+
+    <insert id="batchUpsert" parameterType="java.util.List" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO t_exchange_order (
+        cl_order_id, shareholder_id, market, security_id,
+        side, original_qty, qty, price, status, create_time, version
+        ) VALUES
+        <foreach collection="orders" item="item" separator=",">
+            (
+            #{item.clOrderId}, #{item.shareholderId}, #{item.market}, #{item.securityId},
+            #{item.side, typeHandler=com.example.trading.common.typehandler.SideEnumTypeHandler},
+            #{item.originalQty}, #{item.qty}, #{item.price},
+            #{item.status, typeHandler=org.apache.ibatis.type.EnumOrdinalTypeHandler},
+            #{item.createTime}, #{item.version}
+            )
+        </foreach>
+        ON DUPLICATE KEY UPDATE
+        qty = VALUES(qty),
+        status = VALUES(status),
+        version = version + 1
+    </insert>
+
+    <select id="selectAllClOrderIds" resultType="java.lang.String">
+        SELECT cl_order_id FROM t_exchange_order
+    </select>
 
     <!-- 根据业务单号查询订单 -->
     <select id="selectByClOrderId" parameterType="String" resultMap="OrderResultMap">
@@ -100,4 +124,12 @@
         WHERE status IN (0, 2, 3, 4)
     </select>
 
+    <update id="forceUpdateStatusByClOrderId">
+        UPDATE orders
+        SET status = #{order.status},
+        qty = #{order.qty},
+        update_time = NOW()
+        <!-- 注意：这里不要更新 version，或者 version + 1，视业务需求 -->
+        WHERE cl_order_id = #{order.clOrderId}
+    </update>
 </mapper>

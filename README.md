@@ -39,8 +39,8 @@
   -  自定义表盘（包括：JVM/MySQL/订单数量和成交状态等）
 
         <div style="display:flex; gap:10px;">
-        <img src="./trading_services/docs/09-自定义指标监控.png" width="48%" />
-        <img src="./trading_services/docs/09-2自定义表盘展示.png" width="48%" />
+        <img src="./trading_services/docs/monitoring/09-自定义指标监控.png" width="48%" />
+        <img src="./trading_services/docs/monitoring/09-2自定义表盘展示.png" width="48%" />
         </div>
 7. 安装Redis用于暂存数据库记录，便于失败重试。
 
