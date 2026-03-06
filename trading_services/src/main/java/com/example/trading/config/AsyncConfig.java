@@ -8,7 +8,9 @@ import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler;
 
 import java.util.concurrent.Executor;
+import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.atomic.AtomicInteger;
 
 // 新增线程池配置类
 @Configuration
@@ -33,26 +35,35 @@ public class AsyncConfig {
     }
 
     /**
-     * 撮合线程池
+     * 分片撮合线程池
      */
-    @Bean("matchingExecutor")
-    public Executor matchingExecutor() {
-        ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
-        executor.setCorePoolSize(1);
-        executor.setMaxPoolSize(1);
-        executor.setQueueCapacity(1000);
-        executor.setThreadNamePrefix("matching-");
-        executor.setRejectedExecutionHandler(new ThreadPoolExecutor.CallerRunsPolicy());
-        executor.initialize();
-        return executor;
+    @Bean("shardingMatchingExecutor")
+    public ShardingMatchingExecutor shardingMatchingExecutor() {
+        // 建议分片数设置为 CPU 核心数，或者 2 * CPU
+        int shardCount = Runtime.getRuntime().availableProcessors();
+        return new ShardingMatchingExecutor(Math.max(4, shardCount));
     }
 
-    /*重试任务PersistRetryTaskJob数量*/
-    @Bean
-    public TaskScheduler taskScheduler() {
-        ThreadPoolTaskScheduler scheduler = new ThreadPoolTaskScheduler();
-        scheduler.setPoolSize(5); // 定时任务线程池大小
-        scheduler.setThreadNamePrefix("scheduling-");
-        return scheduler;
+    @Bean("disruptorThreadFactory")
+    public ThreadFactory disruptorThreadFactory() {
+        String threadNamePrefix = "disruptor-event-"; // 定义前缀常量
+        AtomicInteger threadNum = new AtomicInteger(1);
+
+        // 返回自定义ThreadFactory，同时通过匿名内部类暴露前缀
+        return new ThreadFactory() {
+            // 新增：暴露线程名前缀的方法
+            public String getThreadNamePrefix() {
+                return threadNamePrefix;
+            }
+
+            @Override
+            public Thread newThread(Runnable r) {
+                Thread thread = new Thread(r);
+                thread.setName(threadNamePrefix + threadNum.getAndIncrement());
+                thread.setDaemon(false);
+                thread.setPriority(Thread.NORM_PRIORITY);
+                return thread;
+            }
+        };
     }
 }

@@ -46,8 +46,11 @@ public class OrderBook {
      * └─ Key: 600016 → 另一支股票（第一层）
      *    └─ ...
      */
-    private final ConcurrentMap<String, ConcurrentMap<SideEnum, ConcurrentSkipListMap<BigDecimal, PriorityBlockingQueue<Order>>>> orderBookMap =
-            new ConcurrentHashMap<>();
+    private final Map<String, Map<SideEnum, TreeMap<BigDecimal, Deque<Order>>>> orderBookMap =
+            new HashMap<>();
+    // 根据股票ID分片处理，不会再出现多个线程访问同一股票的冲突情况了！！！
+//    private final ConcurrentMap<String, ConcurrentMap<SideEnum, ConcurrentSkipListMap<BigDecimal, PriorityBlockingQueue<Order>>>> orderBookMap =
+//            new ConcurrentHashMap<>();
 
     private final MeterRegistry meterRegistry;
 
@@ -75,10 +78,10 @@ public class OrderBook {
     public void initMetrics() {
         buyQueueSizeGauge = Gauge.builder("trading.orderbook.buy.total_size", () -> {
             int totalBuySize = 0;
-            for (ConcurrentMap<SideEnum, ConcurrentSkipListMap<BigDecimal, PriorityBlockingQueue<Order>>> sideMap : orderBookMap.values()) {
-                ConcurrentSkipListMap<BigDecimal, PriorityBlockingQueue<Order>> buyPriceMap = sideMap.get(SideEnum.BUY);
+            for (Map<SideEnum, TreeMap<BigDecimal, Deque<Order>>> sideMap : orderBookMap.values()) {
+                TreeMap<BigDecimal, Deque<Order>> buyPriceMap = sideMap.get(SideEnum.BUY);
                 if (buyPriceMap != null) {
-                    for (PriorityBlockingQueue<Order> orderQueue : buyPriceMap.values()) {
+                    for (Deque<Order> orderQueue : buyPriceMap.values()) {
                         totalBuySize += orderQueue.size();
                     }
                 }
@@ -88,10 +91,10 @@ public class OrderBook {
 
         sellQueueSizeGauge = Gauge.builder("trading.orderbook.sell.total_size", () -> {
             int totalSellSize = 0;
-            for (ConcurrentMap<SideEnum, ConcurrentSkipListMap<BigDecimal, PriorityBlockingQueue<Order>>> sideMap : orderBookMap.values()) {
-                ConcurrentSkipListMap<BigDecimal, PriorityBlockingQueue<Order>> sellPriceMap = sideMap.get(SideEnum.SELL);
+            for (Map<SideEnum, TreeMap<BigDecimal, Deque<Order>>> sideMap : orderBookMap.values()) {
+                TreeMap<BigDecimal, Deque<Order>> sellPriceMap = sideMap.get(SideEnum.SELL);
                 if (sellPriceMap != null) {
-                    for (PriorityBlockingQueue<Order> orderQueue : sellPriceMap.values()) {
+                    for (Deque<Order> orderQueue : sellPriceMap.values()) {
                         totalSellSize += orderQueue.size();
                     }
                 }
@@ -107,12 +110,11 @@ public class OrderBook {
      */
     private void initOrderBook(String securityId) {
         orderBookMap.computeIfAbsent(securityId, key -> {
-            ConcurrentMap<SideEnum, ConcurrentSkipListMap<BigDecimal, PriorityBlockingQueue<Order>>> sideMap = new ConcurrentHashMap<>();
-
+            Map<SideEnum, TreeMap<BigDecimal, Deque<Order>>> sideMap = new HashMap<>();
             // 买队列：价格降序
-            sideMap.put(SideEnum.BUY, new ConcurrentSkipListMap<>(Comparator.reverseOrder()));
+            sideMap.put(SideEnum.BUY, new TreeMap<>(Comparator.reverseOrder()));
             // 卖队列：价格升序
-            sideMap.put(SideEnum.SELL, new ConcurrentSkipListMap<>(Comparator.naturalOrder()));
+            sideMap.put(SideEnum.SELL, new TreeMap<>());
 
             log.info("初始化股票[{}]的订单簿", securityId);
             return sideMap;
@@ -141,23 +143,13 @@ public class OrderBook {
         BigDecimal normalizedPrice = normalizePrice(order.getPrice());
         // 3. 初始化订单簿结构
         initOrderBook(securityId);
-        ConcurrentSkipListMap<BigDecimal, PriorityBlockingQueue<Order>> priceMap = orderBookMap.get(securityId).get(side);
-
-        // 使用 PriorityBlockingQueue，传入显式时间优先比较器
-        PriorityBlockingQueue<Order> orderQueue = priceMap.computeIfAbsent(normalizedPrice, k ->
-                new PriorityBlockingQueue<>(11, ORDER_TIME_COMPARATOR)); // 初始容量11，默认值
+        TreeMap<BigDecimal, Deque<Order>> priceMap = orderBookMap.get(securityId).get(side);
+        Deque<Order> orderQueue = priceMap.computeIfAbsent(normalizedPrice, k -> new ArrayDeque<>());
 
         // 4. 添加订单到优先队列
-        boolean added = orderQueue.offer(order);
-        if (added) {
-            log.info("订单[{}]已加入[{}]方向订单簿，股票[{}]，价格[{}]，队列长度[{}]",
-                    order.getClOrderId(), side.getDesc(), securityId, normalizedPrice, orderQueue.size());
-
-            // 加入后立即验证，确保订单真的在队列中且排序正确
-            verifyOrderInQueue(order, orderQueue);
-        } else {
-            log.error("订单[{}]添加到订单簿失败：队列已满", order.getClOrderId());
-        }
+        orderQueue.addLast(order);
+        log.info("订单[{}]已加入[{}]方向订单簿，股票[{}]，价格[{}]，队列长度[{}]",
+                order.getClOrderId(), side.getDesc(), securityId, normalizedPrice, orderQueue.size());
     }
 
     /**
@@ -187,7 +179,7 @@ public class OrderBook {
     /**
      * 获取指定股票+方向的价格有序Map
      */
-    public ConcurrentSkipListMap<BigDecimal, PriorityBlockingQueue<Order>> getPriceMap(String securityId, SideEnum side) {
+    public TreeMap<BigDecimal, Deque<Order>> getPriceMap(String securityId, SideEnum side) {
         initOrderBook(securityId);
         return orderBookMap.get(securityId).get(side);
     }
@@ -213,8 +205,8 @@ public class OrderBook {
         }
 
         // 获取价格Map和订单队列
-        ConcurrentSkipListMap<BigDecimal, PriorityBlockingQueue<Order>> priceMap = orderBookMap.get(securityId).get(side);
-        PriorityBlockingQueue<Order> orderQueue = priceMap.get(normalizedPrice);
+        TreeMap<BigDecimal, Deque<Order>> priceMap = orderBookMap.get(securityId).get(side);
+        Deque<Order> orderQueue = priceMap.get(normalizedPrice);
         if (orderQueue == null || orderQueue.isEmpty()) {
             log.warn("订单[{}]对应的价格[{}]队列不存在/为空，无法移除", order.getClOrderId(), normalizedPrice);
             return false;
@@ -262,8 +254,8 @@ public class OrderBook {
         }
 
         // 获取该方向的价格Map和对应价格的订单队列
-        ConcurrentSkipListMap<BigDecimal, PriorityBlockingQueue<Order>> priceMap = orderBookMap.get(securityId).get(side);
-        PriorityBlockingQueue<Order> orderQueue = priceMap.get(normalizedPrice);
+        TreeMap<BigDecimal, Deque<Order>> priceMap = orderBookMap.get(securityId).get(side);
+        Deque<Order> orderQueue = priceMap.get(normalizedPrice);
 
         // 队列不存在/为空 → 订单不存在
         if (orderQueue == null || orderQueue.isEmpty()) {
@@ -304,11 +296,11 @@ public class OrderBook {
         }
 
         // 遍历所有股票的订单簿
-        for (ConcurrentMap<SideEnum, ConcurrentSkipListMap<BigDecimal, PriorityBlockingQueue<Order>>> sideMap : orderBookMap.values()) {
+        for (Map<SideEnum, TreeMap<BigDecimal, Deque<Order>>> sideMap : orderBookMap.values()) {
             // 遍历买卖方向
-            for (ConcurrentSkipListMap<BigDecimal, PriorityBlockingQueue<Order>> priceMap : sideMap.values()) {
+            for (TreeMap<BigDecimal, Deque<Order>> priceMap : sideMap.values()) {
                 // 遍历所有价格队列
-                for (PriorityBlockingQueue<Order> orderQueue : priceMap.values()) {
+                for (Deque<Order> orderQueue : priceMap.values()) {
                     // 匹配订单号
                     Order matchOrder = orderQueue.stream()
                             .filter(o -> clOrderId.equals(o.getClOrderId()))
@@ -332,19 +324,19 @@ public class OrderBook {
         List<Order> allOrders = new ArrayList<>();
 
         // 遍历所有股票的订单簿
-        for (Map.Entry<String, ConcurrentMap<SideEnum, ConcurrentSkipListMap<BigDecimal, PriorityBlockingQueue<Order>>>> securityEntry : orderBookMap.entrySet()) {
+        for (Map.Entry<String, Map<SideEnum, TreeMap<BigDecimal, Deque<Order>>>> securityEntry : orderBookMap.entrySet()) {
             String securityId = securityEntry.getKey();
-            ConcurrentMap<SideEnum, ConcurrentSkipListMap<BigDecimal, PriorityBlockingQueue<Order>>> sideMap = securityEntry.getValue();
+            Map<SideEnum, TreeMap<BigDecimal, Deque<Order>>> sideMap = securityEntry.getValue();
 
             // 遍历买卖方向
-            for (Map.Entry<SideEnum, ConcurrentSkipListMap<BigDecimal, PriorityBlockingQueue<Order>>> sideEntry : sideMap.entrySet()) {
+            for (Map.Entry<SideEnum, TreeMap<BigDecimal, Deque<Order>>> sideEntry : sideMap.entrySet()) {
                 SideEnum side = sideEntry.getKey();
-                ConcurrentSkipListMap<BigDecimal, PriorityBlockingQueue<Order>> priceMap = sideEntry.getValue();
+                TreeMap<BigDecimal, Deque<Order>> priceMap = sideEntry.getValue();
 
                 // 遍历价格层级
-                for (Map.Entry<BigDecimal, PriorityBlockingQueue<Order>> priceEntry : priceMap.entrySet()) {
+                for (Map.Entry<BigDecimal, Deque<Order>> priceEntry : priceMap.entrySet()) {
                     BigDecimal price = priceEntry.getKey();
-                    PriorityBlockingQueue<Order> orderQueue = priceEntry.getValue();
+                    Deque<Order> orderQueue = priceEntry.getValue();
 
                     // 遍历价格下的所有订单
                     List<Order> queueOrders = orderQueue.stream().collect(Collectors.toList());

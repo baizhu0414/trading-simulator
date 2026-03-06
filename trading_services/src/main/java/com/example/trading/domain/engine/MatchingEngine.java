@@ -35,7 +35,6 @@ import java.util.concurrent.atomic.AtomicInteger;
 @RequiredArgsConstructor
 public class MatchingEngine {
     private final OrderBook orderBook;
-    private final StringRedisTemplate redisTemplate;
     private final PriceGenerator priceGenerator;
     @Value("${trading.matching.zero-share-enable:false}")
     private boolean zeroShareEnable;
@@ -79,7 +78,7 @@ public class MatchingEngine {
 
         // 1. 确定对手方向
         SideEnum oppositeSide = newOrderSide == SideEnum.BUY ? SideEnum.SELL : SideEnum.BUY;
-        ConcurrentSkipListMap<BigDecimal, PriorityBlockingQueue<Order>> oppositePriceMap = orderBook.getPriceMap(securityId, oppositeSide);
+        TreeMap<BigDecimal, Deque<Order>> oppositePriceMap = orderBook.getPriceMap(securityId, oppositeSide);
 
         // 2. 遍历对手方价格队列
         for (BigDecimal oppositePrice : oppositePriceMap.keySet()) {
@@ -87,7 +86,7 @@ public class MatchingEngine {
                 break;
             }
 
-            PriorityBlockingQueue<Order> oppositeOrderQueue = oppositePriceMap.get(oppositePrice);
+            Deque<Order> oppositeOrderQueue = oppositePriceMap.get(oppositePrice);
             if (oppositeOrderQueue == null || oppositeOrderQueue.isEmpty()) {
                 continue;
             }
@@ -150,30 +149,30 @@ public class MatchingEngine {
         log.info("开始主动撮合股票[{}]的存量订单", securityId);
         List<RecoveryMatchResult> allResults = new ArrayList<>();
 
-        ConcurrentSkipListMap<BigDecimal, PriorityBlockingQueue<Order>> buyPriceMap = orderBook.getPriceMap(securityId, SideEnum.BUY);
-        ConcurrentSkipListMap<BigDecimal, PriorityBlockingQueue<Order>> sellPriceMap = orderBook.getPriceMap(securityId, SideEnum.SELL);
+        TreeMap<BigDecimal, Deque<Order>> buyPriceMap = orderBook.getPriceMap(securityId, SideEnum.BUY);
+        TreeMap<BigDecimal, Deque<Order>> sellPriceMap = orderBook.getPriceMap(securityId, SideEnum.SELL);
 
         if (buyPriceMap.isEmpty() || sellPriceMap.isEmpty()) {
             log.info("股票[{}]订单簿无匹配的买卖订单，跳过主动撮合", securityId);
             return allResults;
         }
 
-        Iterator<Map.Entry<BigDecimal, PriorityBlockingQueue<Order>>> buyIterator = buyPriceMap.entrySet().iterator();
+        Iterator<Map.Entry<BigDecimal, Deque<Order>>> buyIterator = buyPriceMap.entrySet().iterator();
         while (buyIterator.hasNext()) {
-            Map.Entry<BigDecimal, PriorityBlockingQueue<Order>> buyEntry = buyIterator.next();
+            Map.Entry<BigDecimal, Deque<Order>> buyEntry = buyIterator.next();
             BigDecimal buyPrice = buyEntry.getKey();
-            PriorityBlockingQueue<Order> buyQueue = buyEntry.getValue();
+            Deque<Order> buyQueue = buyEntry.getValue();
 
             if (buyQueue.isEmpty()) {
                 buyIterator.remove();
                 continue;
             }
 
-            Iterator<Map.Entry<BigDecimal, PriorityBlockingQueue<Order>>> sellIterator = sellPriceMap.entrySet().iterator();
+            Iterator<Map.Entry<BigDecimal, Deque<Order>>> sellIterator = sellPriceMap.entrySet().iterator();
             while (sellIterator.hasNext()) {
-                Map.Entry<BigDecimal, PriorityBlockingQueue<Order>> sellEntry = sellIterator.next();
+                Map.Entry<BigDecimal, Deque<Order>> sellEntry = sellIterator.next();
                 BigDecimal sellPrice = sellEntry.getKey();
-                PriorityBlockingQueue<Order> sellQueue = sellEntry.getValue(); // 按时间排序
+                Deque<Order> sellQueue = sellEntry.getValue(); // 按时间排序
 
                 if (sellQueue.isEmpty()) {
                     sellIterator.remove();
@@ -227,7 +226,7 @@ public class MatchingEngine {
     /**
      * 主动撮合：订单对撮合
      */
-    public List<RecoveryMatchResult> matchOrderPairWithPartialFill(PriorityBlockingQueue<Order> buyQueue, PriorityBlockingQueue<Order> sellQueue, String securityId) {
+    public List<RecoveryMatchResult> matchOrderPairWithPartialFill(Deque<Order> buyQueue, Deque<Order> sellQueue, String securityId) {
         List<RecoveryMatchResult> results = new ArrayList<>();
         while (!buyQueue.isEmpty() && !sellQueue.isEmpty()) {
             Order buyOrder = buyQueue.peek();

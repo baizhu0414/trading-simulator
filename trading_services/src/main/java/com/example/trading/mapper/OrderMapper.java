@@ -22,6 +22,8 @@ public interface OrderMapper {
 
     int batchUpsert(@Param("orders") List<Order> orders);
 
+    int batchInsert(@Param("orders") List<Order> orders);
+
     /**
      * 仅用于布隆过滤器查ID
      */

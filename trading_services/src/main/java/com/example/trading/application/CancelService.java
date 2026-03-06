@@ -7,13 +7,13 @@ import com.example.trading.common.RedisConstant;
 import com.example.trading.common.enums.ErrorCodeEnum;
 import com.example.trading.common.enums.OrderStatusEnum;
 import com.example.trading.common.enums.ResponseCodeEnum;
+import com.example.trading.config.ShardingMatchingExecutor;
 import com.example.trading.domain.engine.MatchingEngine;
 import com.example.trading.domain.engine.OrderBook;
 import com.example.trading.domain.model.CancelOrder;
 import com.example.trading.domain.model.Order;
 import com.example.trading.domain.validation.CancelValidator;
 import com.example.trading.util.JsonUtils;
-import io.micrometer.core.annotation.Timed;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
 import jakarta.annotation.PostConstruct;
@@ -34,6 +34,7 @@ public class CancelService {
     private final MatchingEngine matchingEngine;
     private final OrderBook orderBook;
     private final AsyncPersistService asyncPersistService;
+    private final ShardingMatchingExecutor shardingMatchingExecutor; // 注入分片执行器
     private final MeterRegistry meterRegistry;
 
     /* 撤单请求总次数计数器 */
@@ -95,49 +96,52 @@ public class CancelService {
                 return CancelRejectResponse.build(origClOrderId, origClOrderId, validateErrors.get(0));
             }
 
-            // 查询原订单
-            Order originOrder = orderBook.findOrderByClOrderId(origClOrderId);
-            if (originOrder == null) {
-                log.warn("撤单请求失败：原订单[{}]在订单簿中", origClOrderId);
-                cancelRejectCounter.increment();
-                return CancelRejectResponse.build(origClOrderId, origClOrderId, ErrorCodeEnum.ORDER_NOT_IN_ORDER_BOOK);
-            }
+            String securityId = cancelOrder.getSecurityId();
 
-            // 业务校验：撤单信息与原订单一致性校验
-            if (!isCancelInfoMatch(cancelOrder, originOrder)) {
-                log.warn("撤单请求失败：撤单信息与原订单[{}]不匹配", origClOrderId);
-                cancelRejectCounter.increment();
-                return CancelRejectResponse.build(origClOrderId, origClOrderId, ErrorCodeEnum.CANCEL_INFO_MISMATCH);
-            }
+            // 将撤单逻辑封装，提交给分片线程
+            return shardingMatchingExecutor.submitAndWait(securityId, () -> {
+                // 查询原订单
+                Order originOrder = orderBook.findOrderByClOrderId(origClOrderId);
+                if (originOrder == null) {
+                    log.warn("撤单请求失败：原订单[{}]在订单簿中", origClOrderId);
+                    cancelRejectCounter.increment();
+                    return CancelRejectResponse.build(origClOrderId, origClOrderId, ErrorCodeEnum.ORDER_NOT_IN_ORDER_BOOK);
+                }
 
-            // 业务校验：订单状态是否可撤销
-            if (!originOrder.getStatus().isCancelable()) {
-                log.warn("撤单请求失败：原订单[{}]状态[{}]不可撤销", origClOrderId, originOrder.getStatus().getDesc());
-                cancelRejectCounter.increment();
-                return CancelRejectResponse.build(origClOrderId, origClOrderId, ErrorCodeEnum.ORDER_NOT_CANCELABLE);
-            }
+                // 业务校验：撤单信息与原订单一致性校验
+                if (!isCancelInfoMatch(cancelOrder, originOrder)) {
+                    log.warn("撤单请求失败：撤单信息与原订单[{}]不匹配", origClOrderId);
+                    cancelRejectCounter.increment();
+                    return CancelRejectResponse.build(origClOrderId, origClOrderId, ErrorCodeEnum.CANCEL_INFO_MISMATCH);
+                }
 
-            // 调用撮合引擎执行原子撤单
-            boolean removeSuccess = matchingEngine.handleCancelOrder(originOrder);
-            if (!removeSuccess) {
-                log.error("撤单请求失败：原订单[{}]从订单簿全量移除失败", origClOrderId);
-                cancelFailedCounter.increment();
-                return CancelRejectResponse.build(origClOrderId, origClOrderId, ErrorCodeEnum.CANCEL_PROCESS_FAILED);
-            }
+                // 业务校验：订单状态是否可撤销
+                if (!originOrder.getStatus().isCancelable()) {
+                    log.warn("撤单请求失败：原订单[{}]状态[{}]不可撤销", origClOrderId, originOrder.getStatus().getDesc());
+                    cancelRejectCounter.increment();
+                    return CancelRejectResponse.build(origClOrderId, origClOrderId, ErrorCodeEnum.ORDER_NOT_CANCELABLE);
+                }
 
-            // 全量更新原订单字段，qty代表取消订单数。
-            originOrder.setStatus(OrderStatusEnum.CANCELED);
+                // 调用撮合引擎执行原子撤单
+                boolean removeSuccess = matchingEngine.handleCancelOrder(originOrder);
+                if (!removeSuccess) {
+                    log.error("撤单请求失败：原订单[{}]从订单簿全量移除失败", origClOrderId);
+                    cancelFailedCounter.increment();
+                    return CancelRejectResponse.build(origClOrderId, origClOrderId, ErrorCodeEnum.CANCEL_PROCESS_FAILED);
+                }
 
-            // 先告诉用户撤单成功了
-            cancelSuccessCounter.increment();
-            BaseResponse response = buildCancelConfirmResponse(cancelOrder, originOrder);
+                // 全量更新原订单字段，qty代表取消订单数。
+                originOrder.setStatus(OrderStatusEnum.CANCELED);
 
-            // 后台慢慢更新数据库
-            asyncPersistService.persistCancel(originOrder, processingKey);
+                // 先告诉用户撤单成功了
+                cancelSuccessCounter.increment();
+                BaseResponse response = buildCancelConfirmResponse(cancelOrder, originOrder);
+                // 后台慢慢更新数据库
+                asyncPersistService.persistCancel(originOrder, processingKey);
 
-            log.info("撤单[{}]内存处理完成，极速返回", origClOrderId);
-            return response;
-
+                log.info("撤单[{}]内存处理完成，极速返回", origClOrderId);
+                return response;
+            });
         } catch (Exception e) {
             log.error("撤单请求[原订单：{}]事务处理失败", origClOrderId, e);
             cancelFailedCounter.increment();
