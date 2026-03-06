@@ -9,16 +9,12 @@ import com.example.trading.domain.model.Trade;
 import com.lmax.disruptor.EventHandler;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 import org.springframework.stereotype.Component;
 
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.LinkedList;
-import java.util.List;
-import java.util.Map;
-import java.util.Queue;
+import java.util.*;
 import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
 
 @Slf4j
 @Component
@@ -30,13 +26,15 @@ public class PersistEventHandler implements EventHandler<PersistEvent> {
     // 批量队列+线程池（保留原有逻辑）
     private final Queue<PersistSignal> batchQueue = new LinkedList<>();
     private static final int BATCH_SIZE = 100;
-    private final ExecutorService dbExecutor = Executors.newFixedThreadPool(Runtime.getRuntime().availableProcessors());
+    private final ThreadPoolTaskExecutor dbExecutor;
 
     // 2. 构造器注入（无循环依赖）
     @Autowired // 或直接写构造器，推荐构造器注入
-    public PersistEventHandler(PersistCoreService persistCoreService, PersistHelperService persistHelperService) {
+    public PersistEventHandler(PersistCoreService persistCoreService, PersistHelperService persistHelperService,
+        @Qualifier("dbPersistenceExecutor") ThreadPoolTaskExecutor dbPersistenceExecutor) {
         this.persistCoreService = persistCoreService;
         this.persistHelperService = persistHelperService; // 不再依赖AsyncPersistService
+        this.dbExecutor = dbPersistenceExecutor;
     }
 
     // 3. 原有onEvent逻辑保留，仅替换asyncPersistService为persistHelperService
@@ -61,7 +59,9 @@ public class PersistEventHandler implements EventHandler<PersistEvent> {
         batchQueue.clear();
 
         dbExecutor.submit(() -> {
-            List<Order> batchAllOrders = new ArrayList<>();
+            // 1. 使用 Map 存储订单，Key=cl_order_id，自动去重。
+            // LinkedHashMap 保证插入顺序，且如果同一个 ID 出现多次，后面的覆盖前面的（保留最新状态）
+            Map<String, Order> orderMap = new LinkedHashMap<>();
             List<Trade> batchAllTrades = new ArrayList<>();
             Map<String, String> batchOrderProcessingKeys = new HashMap<>();
             List<Order> batchCancelOrders = new ArrayList<>();
@@ -73,11 +73,14 @@ public class PersistEventHandler implements EventHandler<PersistEvent> {
                     switch (signal.getSignalType()) {
                         case ORDER_AND_TRADES:
                             if (signal.getMatchedOrder() != null) {
-                                batchAllOrders.add(signal.getMatchedOrder());
+                                Order matchedOrder = signal.getMatchedOrder();
+                                orderMap.put(matchedOrder.getClOrderId(), matchedOrder);
                                 batchOrderProcessingKeys.put(signal.getMatchedOrder().getClOrderId(), signal.getProcessingKey());
                             }
                             if (signal.getCounterOrders() != null && !signal.getCounterOrders().isEmpty()) {
-                                batchAllOrders.addAll(signal.getCounterOrders());
+                                for (Order counterOrder : signal.getCounterOrders()) {
+                                    orderMap.put(counterOrder.getClOrderId(), counterOrder);
+                                }
                             }
                             if (signal.getTrades() != null && !signal.getTrades().isEmpty()) {
                                 batchAllTrades.addAll(signal.getTrades());
@@ -103,13 +106,20 @@ public class PersistEventHandler implements EventHandler<PersistEvent> {
             }
 
             try {
-                if (!batchAllOrders.isEmpty() || !batchAllTrades.isEmpty()) {
-                    persistCoreService.batchPersistOrderAndTrades(batchAllOrders, batchAllTrades);
+                // 2. 将去重后的 Map 转为 List
+                List<Order> deduplicatedOrders = new ArrayList<>(orderMap.values());
+
+                if (!deduplicatedOrders.isEmpty() || !batchAllTrades.isEmpty()) {
+                    // 3. 传入去重后的 List
+                    persistCoreService.batchPersistOrderAndTrades(deduplicatedOrders, batchAllTrades);
+
+                    // 注意：batchOrderProcessingKeys 可能包含已经被覆盖掉的 Key，
+                    // 但这不影响，因为 markProcessingKeyDone 通常是幂等的
                     batchOrderProcessingKeys.forEach((bizId, processingKey) -> {
-                        // 替换为persistHelperService
                         persistHelperService.markProcessingKeyDone(bizId, processingKey);
                     });
-                    log.info("批量持久化订单{}条、交易记录{}条完成", batchAllOrders.size(), batchAllTrades.size());
+                    log.info("批量持久化订单{}条(去重前{}条)、交易记录{}条完成",
+                            deduplicatedOrders.size(), orderMap.size(), batchAllTrades.size());
                 }
 
                 if (!batchCancelOrders.isEmpty()) {

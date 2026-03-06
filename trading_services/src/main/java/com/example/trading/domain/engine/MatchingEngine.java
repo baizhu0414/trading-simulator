@@ -79,9 +79,10 @@ public class MatchingEngine {
         // 1. 确定对手方向
         SideEnum oppositeSide = newOrderSide == SideEnum.BUY ? SideEnum.SELL : SideEnum.BUY;
         TreeMap<BigDecimal, Deque<Order>> oppositePriceMap = orderBook.getPriceMap(securityId, oppositeSide);
+        List<BigDecimal> prices = new ArrayList<>(oppositePriceMap.keySet());
 
         // 2. 遍历对手方价格队列
-        for (BigDecimal oppositePrice : oppositePriceMap.keySet()) {
+        for (BigDecimal oppositePrice : prices) {
             if (!isPriceMatch(newOrderSide, newOrderPrice, oppositePrice)) {
                 break;
             }

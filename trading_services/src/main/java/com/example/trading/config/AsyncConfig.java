@@ -20,15 +20,33 @@ public class AsyncConfig {
      * 数据库持久化线程池
      */
     @Bean("dbPersistenceExecutor")
-    public Executor dbPersistenceExecutor() {
+    public ThreadPoolTaskExecutor dbPersistenceExecutor() {
         ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
+
+        // 1. 核心线程数：建议 4-8，不需要太多
         executor.setCorePoolSize(5);
-        executor.setMaxPoolSize(10);
-        executor.setQueueCapacity(1000); // 足够大的队列，避免任务溢出
+
+        // 2. 最大线程数：比核心多一点即可，用于应对突发流量
+        executor.setMaxPoolSize(8);
+
+        // 3. 队列容量：1000-5000 均可，根据你的内存容忍度
+        executor.setQueueCapacity(1000);
+
+        // 4. 空闲线程存活时间
         executor.setKeepAliveSeconds(60);
+
+        // 5. 线程名前缀（方便排查问题）
         executor.setThreadNamePrefix("db-persist-");
-        // 拒绝策略 - 队列满时由调用线程执行，绝不丢弃任务
-        executor.setRejectedExecutionHandler(new ThreadPoolExecutor.CallerRunsPolicy());
+
+        // 6. 【关键修改】拒绝策略：
+        // 使用 AbortPolicy，队列满时直接报错，保护 Disruptor 不被拖垮
+        // 或者自定义一个策略，记录日志后丢弃
+        executor.setRejectedExecutionHandler(new ThreadPoolExecutor.AbortPolicy());
+
+        // 7. 【可选】优雅停机相关配置
+        executor.setWaitForTasksToCompleteOnShutdown(true);
+        executor.setAwaitTerminationSeconds(60);
+
         // 初始化
         executor.initialize();
         return executor;

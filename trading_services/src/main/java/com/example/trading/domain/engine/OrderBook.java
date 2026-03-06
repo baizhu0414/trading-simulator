@@ -14,8 +14,6 @@ import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ConcurrentMap;
-import java.util.concurrent.ConcurrentSkipListMap;
 import java.util.concurrent.PriorityBlockingQueue;
 import java.util.stream.Collectors;
 
@@ -33,34 +31,25 @@ public class OrderBook {
      * 示例：
      * orderBookMap（ConcurrentMap）
      * ├─ Key: securityId（如600030）→ 股票维度（第一层）
-     * │  └─ Value: ConcurrentMap<SideEnum, ConcurrentSkipListMap<BigDecimal, Queue<Order>>>
+     * │  └─ Value: HashMap<SideEnum, TreeMap<BigDecimal, Deque<Order>>>
      * │     ├─ Key: SideEnum.BUY → 买卖方向（第二层）
-     * │     │  └─ Value: ConcurrentSkipListMap<BigDecimal, Queue<Order>>（价格降序）
+     * │     │  └─ Value: TreeMap<BigDecimal, Deque<Order>>（价格降序）
      * │     │     ├─ Key: 10.50 → 价格维度（第三层）
-     * │     │     │  └─ Value: Queue<Order> → 该价格下的买单队列（时间优先）
+     * │     │     │  └─ Value: Deque<Order> → 该价格下的买单队列（时间优先）
      * │     │     └─ Key: 10.40
      * │     └─ Key: SideEnum.SELL → 买卖方向（第二层）
-     * │        └─ Value: ConcurrentSkipListMap<BigDecimal, PriorityBlockingQueue<Order>>（价格升序，时间升序）
+     * │        └─ Value: TreeMap<BigDecimal, Deque<Order>>（价格升序，时间升序）
      * │           ├─ Key: 10.50 → 价格维度（第三层）
      * │           └─ Key: 10.60
      * └─ Key: 600016 → 另一支股票（第一层）
      *    └─ ...
      */
-    private final Map<String, Map<SideEnum, TreeMap<BigDecimal, Deque<Order>>>> orderBookMap =
-            new HashMap<>();
+    private final Map<String, Map<SideEnum, TreeMap<BigDecimal, Deque<Order>>>> orderBookMap = new ConcurrentHashMap<>();
     // 根据股票ID分片处理，不会再出现多个线程访问同一股票的冲突情况了！！！
 //    private final ConcurrentMap<String, ConcurrentMap<SideEnum, ConcurrentSkipListMap<BigDecimal, PriorityBlockingQueue<Order>>>> orderBookMap =
 //            new ConcurrentHashMap<>();
 
     private final MeterRegistry meterRegistry;
-
-    /**
-     * 显式定义订单比较器
-     * 排序规则：先按 createTime 升序，
-     *          createTime 相同则按 clOrderId 升序，保证唯一排序键，放置时间重复
-     */
-    private static final Comparator<Order> ORDER_TIME_COMPARATOR =
-            Comparator.comparing(Order::getCreateTime).thenComparing(Order::getClOrderId);
 
     /**
      * 统一 BigDecimal 价格精度为 2 位小数，否则可能价格一致的订单配对不上。
@@ -109,6 +98,7 @@ public class OrderBook {
      * 初始化指定股票的订单簿
      */
     private void initOrderBook(String securityId) {
+        // 对并发敏感，可能执行到一半正在修改，后面的任务进来触发BUG。
         orderBookMap.computeIfAbsent(securityId, key -> {
             Map<SideEnum, TreeMap<BigDecimal, Deque<Order>>> sideMap = new HashMap<>();
             // 买队列：价格降序
@@ -323,7 +313,7 @@ public class OrderBook {
     public List<Order> getAllOrders() {
         List<Order> allOrders = new ArrayList<>();
 
-        // 遍历所有股票的订单簿
+        // 遍历所有股票的订单簿（如果此处修改，别处也修改就会出错。）
         for (Map.Entry<String, Map<SideEnum, TreeMap<BigDecimal, Deque<Order>>>> securityEntry : orderBookMap.entrySet()) {
             String securityId = securityEntry.getKey();
             Map<SideEnum, TreeMap<BigDecimal, Deque<Order>>> sideMap = securityEntry.getValue();
