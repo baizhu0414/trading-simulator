@@ -4,7 +4,6 @@
 #include <vector>
 #include <string>
 #include <mutex>
-#include <queue>
 #include "model/Order.h"
 #include "model/Trade.h"
 
@@ -23,16 +22,6 @@ public:
 
     // 返回订单簿当前未成交订单快照
     std::vector<matcher::model::Order> snapshot() const;
-
-    // 接口：添加订单到订单簿（不撮合）
-    void addOrder(const matcher::model::Order& order);
-
-    // 接口：获取指定方向的价格Map引用（买：价格降序，卖：价格升序）
-    std::map<double, std::vector<matcher::model::Order>, std::greater<double>>& getBuyPriceMap();
-    std::map<double, std::vector<matcher::model::Order>>& getSellPriceMap();
-
-    // 接口：移除订单
-    bool removeOrder(const matcher::model::Order& order);
 
 private:
     // 价格 -> orders. buy: price desc, sell: price asc
