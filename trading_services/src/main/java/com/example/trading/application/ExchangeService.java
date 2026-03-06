@@ -18,7 +18,6 @@ import com.example.trading.domain.validation.OrderValidator;
 import com.example.trading.mapper.OrderMapper;
 import com.example.trading.util.ExecIdGenUtils;
 import com.example.trading.util.JsonUtils;
-import io.micrometer.core.annotation.Timed;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
 import jakarta.annotation.PostConstruct;
@@ -34,6 +33,8 @@ import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
 import java.util.concurrent.TimeUnit;
+
+import com.example.trading.config.ShardingMatchingExecutor;
 
 /**
  * 交易所核心服务
@@ -54,8 +55,9 @@ public class ExchangeService {
     private final MatchingEngine matchingEngine;
     /**
      * 通过{com.example.trading.config.AsyncConfig#matchingExecutor()}解决OOM隐患。
+     * 同时根绝订单ID分片并发进行撮合
      */
-    private final Executor matchingExecutor;
+    private final ShardingMatchingExecutor shardingMatchingExecutor;
 
     /* 订单请求总次数计数器 */
     private Counter orderTotalCounter;
@@ -84,7 +86,7 @@ public class ExchangeService {
             AsyncPersistService asyncPersistService,
             MatchingEngine matchingEngine,
             StringRedisTemplate redisTemplate,
-            @Qualifier("matchingExecutor") Executor matchingExecutor) { // 这里指定Bean名称
+            @Qualifier("shardingMatchingExecutor") final ShardingMatchingExecutor shardingMatchingExecutor) { // 这里指定Bean名称
         this.orderValidator = orderValidator;
         this.selfTradeChecker = selfTradeChecker;
         this.orderMapper = orderMapper;
@@ -93,7 +95,7 @@ public class ExchangeService {
         this.asyncPersistService = asyncPersistService;
         this.matchingEngine = matchingEngine;
         this.redisTemplate = redisTemplate;
-        this.matchingExecutor = matchingExecutor;
+        this.shardingMatchingExecutor = shardingMatchingExecutor;
     }
 
     /**
@@ -154,10 +156,11 @@ public class ExchangeService {
             final Order finalOrder = order;
             final String finalProcessingKey = processingKey;
 
-            // 直接使用注入的 matchingExecutor，单线程撮合
+            // 不再使用全局的 matchingExecutor，而是根据股票ID获取特定的分片执行器->实现了根据股票ID并发撮合
+            Executor targetedExecutor = shardingMatchingExecutor.getExecutor(finalOrder.getSecurityId());
             return CompletableFuture.supplyAsync(() -> {
                 return processOrderInMemory(finalOrder, finalProcessingKey);
-            }, matchingExecutor).join();
+            }, targetedExecutor).join();
 
         } catch (IllegalArgumentException e) {
             log.error("订单[{}]参数格式错误：{}", clOrderId, e.getMessage());
@@ -279,7 +282,7 @@ public class ExchangeService {
             // 3. 既不在 Redis，也不在 DB：说明是布隆误判！
             log.info("订单[{}]布隆误判，DB确认不存在，放行继续处理", clOrderId);
 
-            // 4. 既然是干净的，我们手动执行一遍正常的加锁流程
+            // 4. 既然是干净的，我们手动执行一遍正常的加锁流程（分布式锁，失败说明已存在）
             Boolean isAbsent = redisTemplate.opsForValue()
                     .setIfAbsent(processingKey, RedisConstant.STATUS_PROCESSING,
                             RedisConstant.PROCESSING_KEY_TTL_MINUTES, TimeUnit.MINUTES);

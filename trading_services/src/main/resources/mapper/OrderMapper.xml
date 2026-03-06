@@ -57,7 +57,25 @@
         ON DUPLICATE KEY UPDATE
         qty = VALUES(qty),
         status = VALUES(status),
+        original_qty = VALUES(original_qty),
         version = version + 1
+    </insert>
+
+    <!-- 纯批量插入订单（无冲突更新，仅插入新数据） -->
+    <insert id="batchInsert" parameterType="java.util.List" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO t_exchange_order (
+        cl_order_id, shareholder_id, market, security_id,
+        side, original_qty, qty, price, status, create_time, version
+        ) VALUES
+        <foreach collection="orders" item="item" separator=",">
+            (
+            #{item.clOrderId}, #{item.shareholderId}, #{item.market}, #{item.securityId},
+            #{item.side, typeHandler=com.example.trading.common.typehandler.SideEnumTypeHandler},
+            #{item.originalQty}, #{item.qty}, #{item.price},
+            #{item.status, typeHandler=org.apache.ibatis.type.EnumOrdinalTypeHandler},
+            #{item.createTime}, #{item.version}
+            )
+        </foreach>
     </insert>
 
     <select id="selectAllClOrderIds" resultType="java.lang.String">

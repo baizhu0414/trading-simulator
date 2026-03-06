@@ -4,6 +4,7 @@ import com.example.trading.application.AsyncPersistService;
 import com.example.trading.application.OrderIdempotentService;
 import com.example.trading.common.enums.ErrorCodeEnum;
 import com.example.trading.common.enums.OrderStatusEnum;
+import com.example.trading.config.ShardingMatchingExecutor;
 import com.example.trading.domain.engine.MatchingEngine;
 import com.example.trading.domain.engine.OrderBook;
 import com.example.trading.domain.model.Order;
@@ -23,6 +24,8 @@ import org.springframework.stereotype.Component;
 
 import java.time.LocalDateTime;
 import java.util.*;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 
 /**
@@ -38,6 +41,7 @@ public class OrderRecoveryService implements CommandLineRunner {
     private final MatchingEngine matchingEngine;
     private final SelfTradeChecker selfTradeChecker;
     private final OrderValidator orderValidator;
+    private final ShardingMatchingExecutor shardingMatchingExecutor;
 
     @Value("${trading.recovery.enable:true}")
     private boolean recoveryEnable;
@@ -76,48 +80,45 @@ public class OrderRecoveryService implements CommandLineRunner {
 
     @Override
     public void run(String... args) {
+        log.info("【启动】应用启动，开始执行崩溃恢复流程...");
+
+        // 1. 预热布隆过滤器
         try {
             log.info("【启动】开始预热布隆过滤器...");
-            // 分页加载，防止一次加载几百万条 OOM
-            // 这里简单起见直接调用全量，生产环境建议用 Cursor/PageHelper 分批
             List<String> allIds = orderMapper.selectAllClOrderIds();
             orderIdempotentService.bulkLoad(allIds);
+            log.info("【启动】布隆过滤器预热完成，加载 ID 数量：{}", allIds.size());
         } catch (Exception e) {
             log.error("【启动】布隆过滤器预热失败，但不影响服务启动", e);
         }
+
         if (!recoveryEnable) {
-            log.info("【订单恢复】功能已关闭");
+            log.info("【订单恢复】功能已关闭，跳过");
+            recoveryCompleted = true;
             return;
         }
 
-        int totalRecovered = 0;
-        int totalSkipped = 0;
-        int totalFailed = 0;
-
+        // 用于统计的变量（放在主线程栈，不需要线程安全）
+        final AtomicInteger totalRecovered = new AtomicInteger(0);
+        int totalRecoverSkipped = 0;
+        final AtomicInteger totalRecoverFailed = new AtomicInteger(0);
         Set<String> allRecoveredSecurities = new HashSet<>();
 
         try {
-            // 解析恢复状态
             List<OrderStatusEnum> statusList = parseRecoverStatus(recoverStatus);
             if (statusList.isEmpty()) {
                 log.warn("【订单恢复】无有效恢复状态，跳过");
+                recoveryCompleted = true;
                 return;
             }
-            log.info("【订单恢复】需要恢复的状态：{}",
-                    statusList.stream().map(OrderStatusEnum::getDesc).collect(Collectors.joining(",")));
+            log.info("【订单恢复】需要恢复的状态：{}", statusList.stream().map(OrderStatusEnum::getDesc).collect(Collectors.joining(",")));
 
-            // 24小时超时过滤
-            LocalDateTime expireTime = LocalDateTime.now().minusHours(24);
-            log.info("【订单恢复】过滤24小时前的订单，过期时间：{}", expireTime);
-
-            // 分页恢复
             int pageNum = 1;
             PageInfo<Order> orderPageInfo;
             int totalPages = Integer.MAX_VALUE;
 
             do {
                 PageHelper.startPage(pageNum, batchSize);
-                // 按订单状态查找，结合超时过滤功能
                 List<Order> batchOrders = orderMapper.selectByStatusIn(statusList);
                 orderPageInfo = new PageInfo<>(batchOrders);
 
@@ -131,41 +132,113 @@ public class OrderRecoveryService implements CommandLineRunner {
                     continue;
                 }
 
-                // 批量处理
-                BatchResult batchResult = processBatchOrders(batchOrders);
-                totalRecovered += batchResult.getSuccessCount();
-                totalSkipped += batchResult.getSkipCount();
-                totalFailed += batchResult.getFailCount();
+                // 1. 先在主线程做过滤和校验（CPU 密集型，不涉及共享内存）
+                List<Order> validOrdersToRecover = new ArrayList<>();
+                for (Order order : batchOrders) {
+                    if (order.getStatus().isFinalStatus()) {
+                        log.debug("【订单恢复】订单[{}]已是终态，跳过", order.getClOrderId());
+                        totalRecoverSkipped++;
+                        continue;
+                    }
+                    List<ErrorCodeEnum> validateErrors = orderValidator.validate(order);
+                    if (!validateErrors.isEmpty()) {
+                        log.warn("【订单恢复】订单[{}]校验失败，跳过", order.getClOrderId());
+                        totalRecoverSkipped++;
+                        continue;
+                    }
+                    // 修正状态
+                    OrderStatusEnum originalStatus = order.getStatus();
+                    if (originalStatus == OrderStatusEnum.PROCESSING || originalStatus == OrderStatusEnum.MATCHING) {
+                        order.setStatus(OrderStatusEnum.NOT_FILLED);
+                    }
+                    validOrdersToRecover.add(order);
+                    allRecoveredSecurities.add(order.getSecurityId());
+                }
 
-                recoveryOrderSuccessCounter.increment(batchResult.getSuccessCount());
-                recoveryOrderFailCounter.increment(batchResult.getFailCount());
+                if (validOrdersToRecover.isEmpty()) {
+                    pageNum++;
+                    continue;
+                }
 
-                // 收集本批次的股票代码
-                batchOrders.forEach(order -> allRecoveredSecurities.add(order.getSecurityId()));
+                // 2. 使用 CountDownLatch 等待所有分片加载任务完成
+                // 理由：CountDownLatch 可以精准控制，任务一完成就唤醒主线程，无需盲目 sleep
+                CountDownLatch loadLatch = new CountDownLatch(validOrdersToRecover.size());
+
+                log.info("【订单恢复】本批次需恢复 {} 笔订单，开始并行加载...", validOrdersToRecover.size());
+
+                for (Order order : validOrdersToRecover) {
+                    final Order orderToLoad = order; // lambda 需要 final 变量
+
+                    // 提交给对应股票的分片线程执行
+                    shardingMatchingExecutor.submitAsync(order.getSecurityId(), () -> {
+                        try {
+                            log.debug("【订单恢复】线程[{}]正在加载订单[{}]", Thread.currentThread().getName(), orderToLoad.getClOrderId());
+                            loadOrderToMemory(orderToLoad);
+                            totalRecovered.incrementAndGet();
+                        } catch (Exception e) {
+                            log.error("【订单恢复】订单[{}]加载异常", orderToLoad.getClOrderId(), e);
+                            totalRecoverFailed.incrementAndGet();
+                        } finally {
+                            // 无论成功失败，计数器减一，防止死锁
+                            loadLatch.countDown();
+                        }
+                    });
+                }
+
+                // 3. 主线程等待，直到所有订单加载完毕
+                // 理由：await() 会释放 CPU 资源，进入 WAITING 状态，
+                // 直到最后一个线程执行 countDown()，它会立刻被唤醒，比 sleep(2000) 高效且精准
+                log.info("【订单恢复】等待分片线程加载订单簿...");
+                loadLatch.await();
+                log.info("【订单恢复】本批次订单加载完成");
 
                 pageNum++;
             } while (pageNum <= totalPages);
 
-            log.info("【订单恢复】完成，总计待恢复{}笔，成功{}笔，跳过{}笔，失败{}笔",
-                    totalRecovered + totalSkipped + totalFailed,
-                    totalRecovered, totalSkipped, totalFailed);
+            log.info("【订单恢复】订单加载阶段完成，成功{}笔，跳过{}笔，失败{}笔", totalRecovered, totalRecoverSkipped, totalRecoverFailed);
 
-            // 收集所有股票的撮合结果
-            List<MatchingEngine.RecoveryMatchResult> allRecoveryResults = new ArrayList<>();
+            // ========== 核心修改点 2：并行执行主动撮合 ==========
 
-            for (String securityId : allRecoveredSecurities) {
-                try {
-                    log.info("【订单恢复】开始主动撮合股票[{}]", securityId);
-                    List<MatchingEngine.RecoveryMatchResult> results = matchingEngine.matchOrderBookOrders(securityId);
-                    allRecoveryResults.addAll(results);
-                } catch (Exception e) {
-                    log.error("【订单恢复】股票[{}]主动撮合失败", securityId, e);
-                }
+            if (allRecoveredSecurities.isEmpty()) {
+                log.info("【订单恢复】没有需要恢复的股票，跳过主动撮合");
+                recoveryCompleted = true;
+                return;
             }
 
-            // 将所有收集到的撮合结果，一次性丢给异步线程去持久化
+            // 使用线程安全的 List 来收集多线程撮合结果
+            List<MatchingEngine.RecoveryMatchResult> allRecoveryResults = Collections.synchronizedList(new ArrayList<>());
+
+            // 再次使用 CountDownLatch 等待撮合完成
+            CountDownLatch matchLatch = new CountDownLatch(allRecoveredSecurities.size());
+
+            log.info("【订单恢复】开始对 {} 支股票进行主动撮合...", allRecoveredSecurities.size());
+
+            for (String securityId : allRecoveredSecurities) {
+                final String secId = securityId;
+
+                shardingMatchingExecutor.submitAsync(secId, () -> {
+                    try {
+                        log.info("【订单恢复】线程[{}]开始主动撮合股票[{}]", Thread.currentThread().getName(), secId);
+                        List<MatchingEngine.RecoveryMatchResult> results = matchingEngine.matchOrderBookOrders(secId);
+                        if (results != null && !results.isEmpty()) {
+                            allRecoveryResults.addAll(results);
+                            log.info("【订单恢复】股票[{}]主动撮合产生 {} 笔成交", secId, results.size());
+                        }
+                    } catch (Exception e) {
+                        log.error("【订单恢复】股票[{}]主动撮合失败", secId, e);
+                    } finally {
+                        matchLatch.countDown();
+                    }
+                });
+            }
+
+            // 等待所有撮合任务完成
+            matchLatch.await();
+            log.info("【订单恢复】主动撮合阶段完成");
+
+            // 4. 统一持久化
             if (!allRecoveryResults.isEmpty()) {
-                log.info("【订单恢复】内存撮合完成，产生{}笔成交，提交异步持久化...", allRecoveryResults.size());
+                log.info("【订单恢复】总计产生 {} 笔成交，提交异步持久化...", allRecoveryResults.size());
                 recoveryTradeTotalCounter.increment(allRecoveryResults.size());
                 asyncPersistenceService.persistRecoveryResults(allRecoveryResults);
             }
@@ -173,8 +246,11 @@ public class OrderRecoveryService implements CommandLineRunner {
         } catch (Exception e) {
             recoveryTaskFailedCounter.increment();
             log.error("【订单恢复】全局异常", e);
+        } finally {
+            // 无论成功失败，最后都标记恢复完成，允许健康检查通过
+            recoveryCompleted = true;
+            log.info("【订单恢复】流程全部结束");
         }
-        recoveryCompleted = true; // 用于延迟队长服务，防止应用重启后立刻报错。
     }
 
     /**
@@ -201,53 +277,6 @@ public class OrderRecoveryService implements CommandLineRunner {
     }
 
     /**
-     * 数据恢复-》状态变更后此处记得修改，当前删除NEW已修改
-     */
-    public BatchResult processBatchOrders(List<Order> batchOrders) {
-        int successCount = 0;
-        int failCount = 0;
-        int skipCount = 0;
-
-        for (Order order : batchOrders) {
-            try {
-
-                // 2. 明确的终态：直接跳过 -》FULL_FILLED, RISK_REJECT, REJECTED, CANCELED
-                if (order.getStatus().isFinalStatus()) {
-                    log.info("【订单恢复】订单[{}]已是终态（{}），跳过", order.getClOrderId(), order.getStatus().getDesc());
-                    skipCount++;
-                    continue;
-                }
-
-                // 3. 剩余状态：全部尝试恢复 -》PROCESSING, MATCHING, NOT_FILLED, PART_FILLED
-                List<ErrorCodeEnum> validateErrors = orderValidator.validate(order);
-                if (!validateErrors.isEmpty()) {
-                    log.warn("【订单恢复】订单[{}]校验失败，视为无效跳过", order.getClOrderId());
-                    skipCount++;
-                    continue;
-                }
-
-                OrderStatusEnum originalStatus = order.getStatus();
-                if (originalStatus == OrderStatusEnum.PROCESSING || originalStatus == OrderStatusEnum.MATCHING) {
-                    order.setStatus(OrderStatusEnum.NOT_FILLED);
-                }
-
-                // 加载进内存
-                loadOrderToMemory(order);
-
-                log.info("【订单恢复】订单[{}]恢复成功（原状态：{} -> 现状态：{}）",
-                        order.getClOrderId(), originalStatus.getDesc(), order.getStatus().getDesc());
-                successCount++;
-            } catch (Exception e) {
-                log.error("【订单恢复】订单[{}]恢复异常", order.getClOrderId(), e);
-                failCount++;
-            }
-        }
-
-        log.info("【订单恢复】批次处理：成功{}，跳过{}，失败{}", successCount, skipCount, failCount);
-        return new BatchResult(successCount, skipCount, failCount);
-    }
-
-    /**
      * 辅助方法：统一加载内存
      */
     private void loadOrderToMemory(Order order) {
@@ -257,30 +286,4 @@ public class OrderRecoveryService implements CommandLineRunner {
         selfTradeChecker.putCache(order);
     }
 
-    /**
-     * 扩展BatchResult，拆分skipCount
-     */
-    private static class BatchResult {
-        private final int successCount;
-        private final int skipCount;
-        private final int failCount;
-
-        public BatchResult(int successCount, int skipCount, int failCount) {
-            this.successCount = successCount;
-            this.skipCount = skipCount;
-            this.failCount = failCount;
-        }
-
-        public int getSuccessCount() {
-            return successCount;
-        }
-
-        public int getSkipCount() {
-            return skipCount;
-        }
-
-        public int getFailCount() {
-            return failCount;
-        }
-    }
 }

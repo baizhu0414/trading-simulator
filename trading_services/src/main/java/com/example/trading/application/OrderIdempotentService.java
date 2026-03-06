@@ -18,9 +18,6 @@ import java.util.List;
 @Service
 @RequiredArgsConstructor
 public class OrderIdempotentService {
-
-    private final OrderMapper orderMapper;
-
     /**
      * 预计订单量：根据实际业务调整，例如 1000万
      */

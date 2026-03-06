@@ -7,6 +7,55 @@ spring:
     url: jdbc:mysql://localhost:10001/trading_db?useUnicode=true&characterEncoding=utf8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true
     username: test
     password: test
+    # Druid 连接池具体配置
+    druid:
+      # 初始连接数
+      initial-size: 10
+      # 最小空闲连接
+      min-idle: 10
+      # 最大活跃连接数 (核心配置：根据你的 DB 服务器配置设置，通常设为 CPU核数 * 2 + 1 或 20-50)
+      max-active: 50
+      # 获取连接等待超时时间 (毫秒)
+      max-wait: 60000
+
+      # 配置间隔多久才进行一次检测，检测需要关闭的空闲连接
+      time-between-eviction-runs-millis: 60000
+      # 配置一个连接在池中最小生存的时间
+      min-evictable-idle-time-millis: 300000
+
+      # 用来检测连接是否有效的sql
+      validation-query: SELECT 1
+      # 申请连接时执行validationQuery检测连接是否有效，建议配置为true，不影响性能，并保证安全性
+      test-while-idle: true
+      # 申请连接时执行validationQuery检测连接是否有效，会降低性能
+      test-on-borrow: false
+      # 归还连接时执行validationQuery检测连接是否有效，会降低性能
+      test-on-return: false
+
+      # 打开PSCache，并且指定每个连接上PSCache的大小 (MySQL 建议开启)
+      pool-prepared-statements: true
+      max-pool-prepared-statement-per-connection-size: 20
+
+      # 配置监控统计拦截的filters
+      # stat: 监控统计; log4j2: 日志; wall: 防火墙(防止SQL注入)
+      filters: stat,wall,slf4j
+
+      # WebStatFilter 配置
+      web-stat-filter:
+        enabled: true
+        url-pattern: /*
+        exclusions: "*.js,*.gif,*.jpg,*.png,*.css,*.ico,/druid/*"
+
+      # StatViewServlet 配置 (Druid 监控后台)
+      stat-view-servlet:
+        enabled: true
+        # 监控后台访问路径：http://localhost:8081/druid/index.html
+        url-pattern: /druid/*
+        # 允许清空统计数据
+        reset-enable: false
+        # 监控后台的账号密码 (建议设置)
+        login-username: admin
+        login-password: admin123
   # MyBatis配置
   mybatis:
     mapper-locations: classpath:mapper/*.xml  # Mapper XML文件位置

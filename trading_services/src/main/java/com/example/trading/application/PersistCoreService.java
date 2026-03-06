@@ -115,4 +115,77 @@ public class PersistCoreService {
         selfTradeChecker.removeCache(canceledOrder.getShareholderId(), canceledOrder.getSecurityId());
         log.info("[事务] 撤单[{}] 持久化完成", clOrderId);
     }
+
+    @Transactional(rollbackFor = Exception.class)
+    public void batchPersistOrderAndTrades(List<Order> allOrders, List<Trade> allTrades) {
+        if (allOrders.isEmpty() && allTrades.isEmpty()) {
+            return;
+        }
+
+        log.info("[批量事务] 开始持久化订单{}条、交易记录{}条", allOrders.size(), allTrades.size());
+
+        // 1. 批量插入交易记录（Trade无冲突，优先插入）
+        if (!allTrades.isEmpty()) {
+            tradeMapper.batchInsert(allTrades);
+            log.info("[批量事务] 批量插入交易记录{}条完成", allTrades.size());
+        }
+
+        // 2. 批量Upsert订单（复用原有batchUpsert方法）
+        if (!allOrders.isEmpty()) {
+            allOrders.forEach(o -> {
+                if (o.getVersion() == null) o.setVersion(0);
+            });
+            orderMapper.batchUpsert(allOrders);
+            log.info("[批量事务] 批量Upsert订单{}条完成", allOrders.size());
+
+            // 3. 批量更新版本号
+            allOrders.forEach(o -> o.setVersion(o.getVersion() + 1));
+        }
+
+        log.info("[批量事务] 订单+交易批量持久化完成");
+    }
+
+    /**
+     * 批量持久化撤单（真正的批量SQL）
+     */
+    @Transactional(rollbackFor = Exception.class)
+    public void batchPersistCancelOrders(List<Order> canceledOrders) {
+        if (canceledOrders.isEmpty()) {
+            return;
+        }
+
+        log.info("[批量事务] 开始批量持久化撤单{}条", canceledOrders.size());
+
+        // 1. 先尝试批量更新
+        canceledOrders.forEach(o -> {
+            if (o.getVersion() == null) o.setVersion(0);
+        });
+        int updateCount = orderMapper.batchUpdateById(canceledOrders);
+        log.info("[批量事务] 批量更新撤单{}条，成功{}条", canceledOrders.size(), updateCount);
+
+        // 2. 对更新失败的订单，批量插入（处理未入库的情况）
+        List<Order> insertList = canceledOrders.stream()
+                .filter(o -> o.getId() == null || o.getVersion() == 0) // 未入库的订单
+                .toList();
+        if (!insertList.isEmpty()) {
+            try {
+                orderMapper.batchInsert(insertList);
+                log.info("[批量事务] 批量插入撤单{}条完成", insertList.size());
+            } catch (DuplicateKeyException dke) {
+                // 插入冲突时，强制更新状态
+                insertList.forEach(o -> {
+                    orderMapper.forceUpdateStatusByClOrderId(o);
+                });
+                log.info("[批量事务] 批量插入冲突，强制更新撤单{}条完成", insertList.size());
+            }
+        }
+
+        // 3. 批量清理风控缓存
+        canceledOrders.forEach(o -> {
+            selfTradeChecker.removeCache(o.getShareholderId(), o.getSecurityId());
+            o.setVersion(o.getVersion() + 1);
+        });
+
+        log.info("[批量事务] 撤单批量持久化完成");
+    }
 }
