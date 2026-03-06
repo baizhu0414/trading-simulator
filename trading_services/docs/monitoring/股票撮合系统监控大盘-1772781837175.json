@@ -89,7 +89,6 @@
             "mode": "thresholds"
           },
           "decimals": 2,
-          "displayName": "订单申报成功率",
           "mappings": [],
           "thresholds": {
             "mode": "absolute",
@@ -145,12 +144,25 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "sum(increase(trading_order_success_total{job=~\"$job\"}[1d])) \r\n/ \r\nclamp_min(sum(increase(trading_order_total{job=~\"$job\"}[1d])), 1)",
+          "expr": "sum(increase(trading_order_success_total{job=~\"$job\"}[10m])) \r\n/ \r\nclamp_min(sum(increase(trading_order_total{job=~\"$job\"}[10m])), 1)",
           "format": "time_series",
           "instant": false,
-          "legendFormat": "订单申报成功率",
+          "legendFormat": "订单申报成功率(10min)",
           "range": true,
           "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "code",
+          "expr": "sum(increase(trading_order_reject_total{job=~\"$job\"}[10m])) \r\n/ \r\nclamp_min(sum(increase(trading_order_total{job=~\"$job\"}[10m])), 1)",
+          "hide": false,
+          "instant": false,
+          "legendFormat": "订单申报拒绝率",
+          "range": true,
+          "refId": "B"
         }
       ],
       "title": "A",
@@ -310,7 +322,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "sum(increase(trading_trade_total{job=~\"$job\"}[1d])) + sum(increase(trading_trade_recovery_total{job=~\"$job\"}[1d]))",
+          "expr": "sum(increase(trading_trade_total{job=~\"$job\"}[3h])) + sum(increase(trading_trade_recovery_total{job=~\"$job\"}[3h]))",
           "instant": false,
           "legendFormat": "__auto",
           "range": true,
@@ -331,7 +343,7 @@
             "mode": "thresholds"
           },
           "decimals": 0,
-          "displayName": "数据一致性异常数(缓存数据异常)",
+          "displayName": "数据一致性总异常数(缓存数据异常)",
           "mappings": [],
           "thresholds": {
             "mode": "absolute",
@@ -387,7 +399,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "sum(increase(trading_consistency_check_mismatch_total{job=~\"$job\"}[1d]))",
+          "expr": "sum(increase(trading_consistency_check_mismatch_total{job=~\"$job\"}[3h]))",
           "instant": false,
           "legendFormat": "__auto",
           "range": true,
@@ -833,9 +845,9 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "sum(rate(trading_order_reject_total{job=~\"$job\"}[1h])) / clamp_min(sum(rate(trading_order_total{job=~\"$job\"}[1h])), 1)",
+          "expr": "sum(rate(trading_order_reject_total{job=~\"$job\"}[10m])) / clamp_min(sum(rate(trading_order_total{job=~\"$job\"}[10m])), 1)",
           "instant": false,
-          "legendFormat": "订单申报拒绝错单率（1h滑动窗口）",
+          "legendFormat": "订单申报拒绝错单率（10m滑动窗口）",
           "range": true,
           "refId": "A"
         },
@@ -845,10 +857,10 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "sum(rate(trading_order_failed_total{job=~\"$job\"}[1h])) / clamp_min(sum(rate(trading_order_total{job=~\"$job\"}[1h])), 1)",
+          "expr": "sum(rate(trading_order_failed_total{job=~\"$job\"}[10m])) / clamp_min(sum(rate(trading_order_total{job=~\"$job\"}[10m])), 1)",
           "hide": false,
           "instant": false,
-          "legendFormat": "订单申报失败率（1h滑动窗口）",
+          "legendFormat": "订单申报失败率（10m滑动窗口）",
           "range": true,
           "refId": "B"
         }
@@ -857,7 +869,7 @@
       "type": "timeseries"
     },
     {
-      "collapsed": true,
+      "collapsed": false,
       "gridPos": {
         "h": 1,
         "w": 24,
@@ -865,342 +877,702 @@
         "y": 24
       },
       "id": 11,
-      "panels": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "fieldConfig": {
-            "defaults": {
-              "color": {
-                "mode": "palette-classic"
-              },
-              "custom": {
-                "hideFrom": {
-                  "legend": false,
-                  "tooltip": false,
-                  "viz": false
-                }
-              },
-              "mappings": []
-            },
-            "overrides": []
-          },
-          "gridPos": {
-            "h": 6,
-            "w": 7,
-            "x": 0,
-            "y": 3
-          },
-          "id": 12,
-          "options": {
-            "displayLabels": [
-              "percent"
-            ],
-            "legend": {
-              "displayMode": "list",
-              "placement": "right",
-              "showLegend": true,
-              "values": [
-                "value"
-              ]
-            },
-            "pieType": "pie",
-            "reduceOptions": {
-              "calcs": [
-                "lastNotNull"
-              ],
-              "fields": "",
-              "values": false
-            },
-            "tooltip": {
-              "mode": "single",
-              "sort": "none"
-            }
-          },
-          "targets": [
-            {
-              "datasource": {
-                "type": "prometheus",
-                "uid": "${DS_PROMETHEUS}"
-              },
-              "editorMode": "code",
-              "expr": "trading_cancel_success_total",
-              "instant": false,
-              "legendFormat": "成功撤单数",
-              "range": true,
-              "refId": "A"
-            },
-            {
-              "datasource": {
-                "type": "prometheus",
-                "uid": "${DS_PROMETHEUS}"
-              },
-              "editorMode": "code",
-              "expr": "trading_cancel_failed_total",
-              "hide": false,
-              "instant": false,
-              "legendFormat": "失败撤单数",
-              "range": true,
-              "refId": "B"
-            },
-            {
-              "datasource": {
-                "type": "prometheus",
-                "uid": "${DS_PROMETHEUS}"
-              },
-              "editorMode": "code",
-              "expr": "trading_cancel_reject_total",
-              "hide": false,
-              "instant": false,
-              "legendFormat": "撤单拒绝数",
-              "range": true,
-              "refId": "C"
-            }
-          ],
-          "title": "撤单全链路流量时序图",
-          "type": "piechart"
-        }
-      ],
+      "panels": [],
       "title": "03撤单全链路流量时序图",
       "type": "row"
     },
     {
-      "collapsed": true,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            }
+          },
+          "mappings": []
+        },
+        "overrides": []
+      },
       "gridPos": {
-        "h": 1,
-        "w": 24,
+        "h": 6,
+        "w": 7,
         "x": 0,
         "y": 25
       },
-      "id": 13,
-      "panels": [
+      "id": 12,
+      "options": {
+        "displayLabels": [
+          "percent"
+        ],
+        "legend": {
+          "displayMode": "list",
+          "placement": "right",
+          "showLegend": true,
+          "values": [
+            "value"
+          ]
+        },
+        "pieType": "pie",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "targets": [
         {
           "datasource": {
             "type": "prometheus",
             "uid": "${DS_PROMETHEUS}"
           },
-          "fieldConfig": {
-            "defaults": {
-              "color": {
-                "mode": "palette-classic"
-              },
-              "custom": {
-                "hideFrom": {
-                  "legend": false,
-                  "tooltip": false,
-                  "viz": false
-                }
-              },
-              "mappings": []
-            },
-            "overrides": []
+          "editorMode": "code",
+          "expr": "trading_cancel_success_total",
+          "instant": false,
+          "legendFormat": "成功撤单数",
+          "range": true,
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
           },
-          "gridPos": {
-            "h": 5,
-            "w": 7,
-            "x": 0,
-            "y": 4
+          "editorMode": "code",
+          "expr": "trading_cancel_failed_total",
+          "hide": false,
+          "instant": false,
+          "legendFormat": "失败撤单数",
+          "range": true,
+          "refId": "B"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
           },
-          "id": 14,
-          "options": {
-            "displayLabels": [
-              "percent"
-            ],
-            "legend": {
-              "displayMode": "list",
-              "placement": "right",
-              "showLegend": true,
-              "values": [
-                "value"
-              ]
-            },
-            "pieType": "pie",
-            "reduceOptions": {
-              "calcs": [
-                "lastNotNull"
-              ],
-              "fields": "",
-              "values": false
-            },
-            "tooltip": {
-              "mode": "single",
-              "sort": "none"
-            }
-          },
-          "targets": [
-            {
-              "datasource": {
-                "type": "prometheus",
-                "uid": "${DS_PROMETHEUS}"
-              },
-              "editorMode": "code",
-              "expr": "trading_persist_success_total",
-              "instant": false,
-              "legendFormat": "持久化成功",
-              "range": true,
-              "refId": "A"
-            },
-            {
-              "datasource": {
-                "type": "prometheus",
-                "uid": "${DS_PROMETHEUS}"
-              },
-              "editorMode": "code",
-              "expr": "trading_persist_fail_total",
-              "hide": false,
-              "instant": false,
-              "legendFormat": "持久化最终失败",
-              "range": true,
-              "refId": "B"
-            },
-            {
-              "datasource": {
-                "type": "prometheus",
-                "uid": "${DS_PROMETHEUS}"
-              },
-              "editorMode": "code",
-              "expr": "trading_persist_retry_total",
-              "hide": false,
-              "instant": false,
-              "legendFormat": "持久化重试",
-              "range": true,
-              "refId": "C"
-            }
-          ],
-          "title": "4.A",
-          "type": "piechart"
+          "editorMode": "code",
+          "expr": "trading_cancel_reject_total",
+          "hide": false,
+          "instant": false,
+          "legendFormat": "撤单拒绝数",
+          "range": true,
+          "refId": "C"
         }
       ],
+      "title": "撤单全链路流量时序图",
+      "type": "piechart"
+    },
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 31
+      },
+      "id": 13,
+      "panels": [],
       "title": "04数据持久化",
       "type": "row"
     },
     {
-      "collapsed": true,
-      "gridPos": {
-        "h": 1,
-        "w": 24,
-        "x": 0,
-        "y": 26
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
       },
-      "id": 15,
-      "panels": [
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            }
+          },
+          "mappings": []
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 7,
+        "x": 0,
+        "y": 32
+      },
+      "id": 14,
+      "options": {
+        "displayLabels": [
+          "percent"
+        ],
+        "legend": {
+          "displayMode": "list",
+          "placement": "right",
+          "showLegend": true,
+          "values": [
+            "value"
+          ]
+        },
+        "pieType": "pie",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "targets": [
         {
           "datasource": {
             "type": "prometheus",
             "uid": "${DS_PROMETHEUS}"
           },
-          "fieldConfig": {
-            "defaults": {
-              "color": {
-                "mode": "palette-classic"
-              },
-              "custom": {
-                "hideFrom": {
-                  "legend": false,
-                  "tooltip": false,
-                  "viz": false
-                }
-              },
-              "mappings": []
-            },
-            "overrides": [
-              {
-                "matcher": {
-                  "id": "byName",
-                  "options": "一致性检测失败数量（开发过程辅助）"
-                },
-                "properties": [
-                  {
-                    "id": "color",
-                    "value": {
-                      "fixedColor": "red",
-                      "mode": "fixed"
-                    }
-                  }
-                ]
-              }
-            ]
+          "editorMode": "code",
+          "expr": "trading_persist_success_total",
+          "instant": false,
+          "legendFormat": "持久化成功",
+          "range": true,
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
           },
-          "gridPos": {
-            "h": 5,
-            "w": 10,
-            "x": 0,
-            "y": 5
+          "editorMode": "code",
+          "expr": "trading_persist_fail_total",
+          "hide": false,
+          "instant": false,
+          "legendFormat": "持久化最终失败",
+          "range": true,
+          "refId": "B"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
           },
-          "id": 16,
-          "options": {
-            "displayLabels": [
-              "percent"
-            ],
-            "legend": {
-              "displayMode": "list",
-              "placement": "right",
-              "showLegend": true,
-              "values": [
-                "value"
-              ]
-            },
-            "pieType": "pie",
-            "reduceOptions": {
-              "calcs": [
-                "lastNotNull"
-              ],
-              "fields": "",
-              "values": false
-            },
-            "tooltip": {
-              "mode": "single",
-              "sort": "none"
-            }
-          },
-          "targets": [
-            {
-              "datasource": {
-                "type": "prometheus",
-                "uid": "${DS_PROMETHEUS}"
-              },
-              "editorMode": "code",
-              "expr": "trading_consistency_check_total",
-              "instant": false,
-              "legendFormat": "总检测单量",
-              "range": true,
-              "refId": "A"
-            },
-            {
-              "datasource": {
-                "type": "prometheus",
-                "uid": "${DS_PROMETHEUS}"
-              },
-              "editorMode": "code",
-              "expr": "trading_consistency_check_failed_total",
-              "hide": false,
-              "instant": false,
-              "legendFormat": "一致性检测失败数量（开发过程辅助）",
-              "range": true,
-              "refId": "B"
-            },
-            {
-              "datasource": {
-                "type": "prometheus",
-                "uid": "${DS_PROMETHEUS}"
-              },
-              "editorMode": "code",
-              "expr": "trading_consistency_check_mismatch_total",
-              "hide": false,
-              "instant": false,
-              "legendFormat": "不匹配数量",
-              "range": true,
-              "refId": "C"
-            }
-          ],
-          "title": "一致性检测（开发辅助）",
-          "type": "piechart"
+          "editorMode": "code",
+          "expr": "trading_persist_retry_total",
+          "hide": false,
+          "instant": false,
+          "legendFormat": "持久化重试",
+          "range": true,
+          "refId": "C"
         }
       ],
+      "title": "4.A",
+      "type": "piechart"
+    },
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 37
+      },
+      "id": 15,
+      "panels": [],
       "title": "05数据一致性合规监控",
       "type": "row"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            }
+          },
+          "mappings": []
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "一致性检测失败数量（开发过程辅助）"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "red",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 10,
+        "x": 0,
+        "y": 38
+      },
+      "id": 16,
+      "options": {
+        "displayLabels": [
+          "percent"
+        ],
+        "legend": {
+          "displayMode": "list",
+          "placement": "right",
+          "showLegend": true,
+          "values": [
+            "value"
+          ]
+        },
+        "pieType": "pie",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "code",
+          "expr": "trading_consistency_check_total",
+          "instant": false,
+          "legendFormat": "总检测单量",
+          "range": true,
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "code",
+          "expr": "trading_consistency_check_failed_total",
+          "hide": false,
+          "instant": false,
+          "legendFormat": "一致性检测失败数量（开发过程辅助）",
+          "range": true,
+          "refId": "B"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "code",
+          "expr": "trading_consistency_check_mismatch_total",
+          "hide": false,
+          "instant": false,
+          "legendFormat": "不匹配数量",
+          "range": true,
+          "refId": "C"
+        }
+      ],
+      "title": "一致性检测（开发辅助）",
+      "type": "piechart"
+    },
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 43
+      },
+      "id": 20,
+      "panels": [],
+      "title": "06-时间统计",
+      "type": "row"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 10,
+        "x": 0,
+        "y": 44
+      },
+      "id": 21,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "code",
+          "expr": "1000 *(rate(trading_order_process_time_seconds_sum[1h])\r\n/\r\nrate(trading_order_process_time_seconds_count[1h]))",
+          "instant": false,
+          "legendFormat": "订单处理平均耗时",
+          "range": true,
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "code",
+          "expr": "1000 *(rate(trading_cancel_process_time_seconds_sum[1h])\r\n/\r\nrate(trading_cancel_process_time_seconds_count[1h]))",
+          "hide": false,
+          "instant": false,
+          "legendFormat": "撤单平均耗时",
+          "range": true,
+          "refId": "B"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "code",
+          "expr": "1000 *(rate(trading_order_match_time_seconds_sum[1h])\r\n/\r\nrate(trading_order_match_time_seconds_count[1h]))",
+          "hide": false,
+          "instant": false,
+          "legendFormat": "撮合平均耗时",
+          "range": true,
+          "refId": "C"
+        }
+      ],
+      "title": "平均耗时（Average Latency, 单位：ms）",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 10,
+        "x": 10,
+        "y": 44
+      },
+      "id": 22,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "code",
+          "expr": "1000*histogram_quantile(\r\n  0.99,\r\n  sum(rate(trading_order_process_time_seconds_bucket[1m])) by (le)\r\n)",
+          "instant": false,
+          "legendFormat": "订单处理最大耗时",
+          "range": true,
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "code",
+          "expr": "1000*histogram_quantile(\r\n  0.99,\r\n  sum(rate(trading_cancel_process_time_seconds_bucket[1m])) by (le)\r\n)",
+          "hide": false,
+          "instant": false,
+          "legendFormat": "撤单请求最大耗时",
+          "range": true,
+          "refId": "B"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "code",
+          "expr": "1000*histogram_quantile(\r\n  0.99,\r\n  sum(rate(trading_order_match_time_seconds_bucket[1m])) by (le)\r\n)",
+          "hide": false,
+          "instant": false,
+          "legendFormat": "撮合过程最大耗时",
+          "range": true,
+          "refId": "C"
+        }
+      ],
+      "title": "最大耗时（Max Latency）",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 10,
+        "x": 0,
+        "y": 50
+      },
+      "id": 23,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "code",
+          "expr": "rate(trading_order_success_total[1m]) + rate(trading_cancel_success_total[1m])",
+          "instant": false,
+          "legendFormat": "成功下单TPS + 成功撤单TPS = 总成功TPS",
+          "range": true,
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "code",
+          "expr": "rate(trading_cancel_success_total[1m])",
+          "hide": false,
+          "instant": false,
+          "legendFormat": "撤单请求处理TPS",
+          "range": true,
+          "refId": "B"
+        }
+      ],
+      "title": "吞吐量（Trading Throughput）",
+      "type": "timeseries"
     }
   ],
   "refresh": "",
@@ -1258,13 +1630,13 @@
     ]
   },
   "time": {
-    "from": "now-6h",
+    "from": "now-30m",
     "to": "now"
   },
   "timepicker": {},
   "timezone": "",
   "title": "股票撮合系统监控大盘",
   "uid": "b87921d4-a2d2-4c8d-9fd4-423fefc9f408",
-  "version": 11,
+  "version": 36,
   "weekStart": ""
 }

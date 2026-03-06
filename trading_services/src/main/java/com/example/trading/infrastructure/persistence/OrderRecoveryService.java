@@ -1,6 +1,7 @@
 package com.example.trading.infrastructure.persistence;
 
 import com.example.trading.application.AsyncPersistService;
+import com.example.trading.application.OrderIdempotentService;
 import com.example.trading.common.enums.ErrorCodeEnum;
 import com.example.trading.common.enums.OrderStatusEnum;
 import com.example.trading.domain.engine.MatchingEngine;
@@ -14,29 +15,25 @@ import com.github.pagehelper.PageInfo;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
 import jakarta.annotation.PostConstruct;
-import jakarta.annotation.Resource;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.CommandLineRunner;
 import org.springframework.stereotype.Component;
-import org.springframework.transaction.PlatformTransactionManager;
-import org.springframework.transaction.TransactionDefinition;
-import org.springframework.transaction.TransactionStatus;
-import org.springframework.transaction.support.DefaultTransactionDefinition;
 
 import java.time.LocalDateTime;
 import java.util.*;
 import java.util.stream.Collectors;
 
 /**
- * 订单崩溃恢复服务
+ * 应用崩溃订单恢复服务
  */
 @Slf4j
 @Component
 @RequiredArgsConstructor
 public class OrderRecoveryService implements CommandLineRunner {
     private final OrderMapper orderMapper;
+    private final OrderIdempotentService orderIdempotentService;
     private final OrderBook orderBook;
     private final MatchingEngine matchingEngine;
     private final SelfTradeChecker selfTradeChecker;
@@ -46,7 +43,7 @@ public class OrderRecoveryService implements CommandLineRunner {
     private boolean recoveryEnable;
 
     // 默认恢复状态加入NOT_FILLED
-    @Value("${trading.recovery.recover-status:PROCESSING,MATCHING,NOT_FILLED,PART_FILLED}")
+    @Value("${trading.recovery.recover-status:MATCHING,NOT_FILLED,PART_FILLED}")
     private String recoverStatus;
 
     @Value("${trading.recovery.batch-size:100}")
@@ -59,12 +56,6 @@ public class OrderRecoveryService implements CommandLineRunner {
     public boolean isRecoveryCompleted() {
         return recoveryCompleted;
     }
-
-    @Resource
-    private PlatformTransactionManager transactionManager;
-    // 显式指定事务传播级别，增强可读性
-    private final TransactionDefinition transactionDefinition = new DefaultTransactionDefinition(TransactionDefinition.PROPAGATION_REQUIRED);
-
     private final MeterRegistry meterRegistry;
     /* 订单恢复任务执行失败次数计数器 */
     private Counter recoveryTaskFailedCounter;
@@ -85,6 +76,15 @@ public class OrderRecoveryService implements CommandLineRunner {
 
     @Override
     public void run(String... args) {
+        try {
+            log.info("【启动】开始预热布隆过滤器...");
+            // 分页加载，防止一次加载几百万条 OOM
+            // 这里简单起见直接调用全量，生产环境建议用 Cursor/PageHelper 分批
+            List<String> allIds = orderMapper.selectAllClOrderIds();
+            orderIdempotentService.bulkLoad(allIds);
+        } catch (Exception e) {
+            log.error("【启动】布隆过滤器预热失败，但不影响服务启动", e);
+        }
         if (!recoveryEnable) {
             log.info("【订单恢复】功能已关闭");
             return;
@@ -209,21 +209,12 @@ public class OrderRecoveryService implements CommandLineRunner {
         int skipCount = 0;
 
         for (Order order : batchOrders) {
-            TransactionStatus txStatus = transactionManager.getTransaction(transactionDefinition);
             try {
-                // 1. 超时订单直接跳过——此逻辑已从数据库OrderMapper中删除，长期运行可以考虑添加。
-//                if (order.getCreateTime().isBefore(LocalDateTime.now().minusHours(24))) {
-//                    log.info("【订单恢复】订单[{}]已超时（>24小时），跳过", order.getClOrderId());
-//                    skipCount++;
-//                    transactionManager.commit(txStatus);
-//                    continue;
-//                }
 
                 // 2. 明确的终态：直接跳过 -》FULL_FILLED, RISK_REJECT, REJECTED, CANCELED
                 if (order.getStatus().isFinalStatus()) {
                     log.info("【订单恢复】订单[{}]已是终态（{}），跳过", order.getClOrderId(), order.getStatus().getDesc());
                     skipCount++;
-                    transactionManager.commit(txStatus);
                     continue;
                 }
 
@@ -232,7 +223,6 @@ public class OrderRecoveryService implements CommandLineRunner {
                 if (!validateErrors.isEmpty()) {
                     log.warn("【订单恢复】订单[{}]校验失败，视为无效跳过", order.getClOrderId());
                     skipCount++;
-                    transactionManager.commit(txStatus);
                     continue;
                 }
 
@@ -247,11 +237,7 @@ public class OrderRecoveryService implements CommandLineRunner {
                 log.info("【订单恢复】订单[{}]恢复成功（原状态：{} -> 现状态：{}）",
                         order.getClOrderId(), originalStatus.getDesc(), order.getStatus().getDesc());
                 successCount++;
-
-                transactionManager.commit(txStatus);
-
             } catch (Exception e) {
-                transactionManager.rollback(txStatus);
                 log.error("【订单恢复】订单[{}]恢复异常", order.getClOrderId(), e);
                 failCount++;
             }

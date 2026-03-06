@@ -1,5 +1,6 @@
 package com.example.trading.application;
 
+import com.example.trading.common.RedisConstant;
 import com.example.trading.domain.engine.MatchingEngine.RecoveryMatchResult;
 import com.example.trading.domain.model.Order;
 import com.example.trading.domain.model.Trade;
@@ -17,8 +18,13 @@ import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
+import java.util.Arrays;
 import java.util.List;
+import java.util.concurrent.TimeUnit;
 
+/**
+ * 持久化任务入口
+ */
 @Slf4j
 @Service
 @RequiredArgsConstructor
@@ -27,12 +33,8 @@ public class AsyncPersistService {
     private final PersistCoreService persistCoreService;
     private final StringRedisTemplate redisTemplate;
     private final MeterRegistry meterRegistry;
-
     @Value("${db.persist.retry.count:3}")
     private int retryCount;
-
-    public static final String PERSIST_RETRY_QUEUE = "trading:persist:retry:queue"; // redis使用
-
     // 监控指标
     private Counter persistFailCounter;
     private Counter persistRetryCounter;
@@ -53,11 +55,13 @@ public class AsyncPersistService {
     }
 
     @Async("dbPersistenceExecutor")
-    public void persistOrderAndTrades(Order matchedOrder, List<Order> counterOrders, List<Trade> trades) {
+    public void persistOrderAndTrades(Order matchedOrder, List<Order> counterOrders, List<Trade> trades, String processingKey) {
         String bizId = matchedOrder.getClOrderId();
-        executePersist( // Runnable在同线程
+        executePersist(
                 () -> persistCoreService.doPersistOrderAndTrades(matchedOrder, counterOrders, trades),
-                bizId, "order_and_trades", matchedOrder, counterOrders, trades
+                bizId, "order_and_trades",
+                processingKey, // 传入 Redis Key
+                matchedOrder, counterOrders, trades
         );
     }
 
@@ -66,16 +70,20 @@ public class AsyncPersistService {
         String batchId = "RECOVER_" + System.currentTimeMillis();
         executePersist(
                 () -> persistCoreService.doPersistRecoveryResults(allRecoveryResults),
-                batchId, "recovery", allRecoveryResults
+                batchId, "recovery",
+                null,
+                allRecoveryResults
         );
     }
 
     @Async("dbPersistenceExecutor")
-    public void persistCancel(Order canceledOrder) {
+    public void persistCancel(Order canceledOrder, String processingKey) {
         String bizId = canceledOrder.getClOrderId();
         executePersist(
                 () -> persistCoreService.doPersistCancel(canceledOrder),
-                bizId, "cancel", canceledOrder
+                bizId, "cancel",
+                processingKey, // 传递 key
+                canceledOrder
         );
     }
 
@@ -83,14 +91,29 @@ public class AsyncPersistService {
      * 持久化执行：包含重试、入队和告警逻辑
      */
     private void executePersist(Runnable task, String bizId, String type, Object... params) {
+        String processingKey = (String) params[0];
         if (executeWithRetry(task, bizId, type)) {
+            try {
+                redisTemplate.opsForValue().set(processingKey, RedisConstant.STATUS_DONE,
+                        RedisConstant.DONE_KEY_TTL_HOURS, TimeUnit.HOURS);
+                log.info("[持久化] 订单[{}]标记为完成(DONE)", bizId);
+            } catch (Exception e) {
+                log.warn("[持久化] 成功但删除Redis Key失败: {}", processingKey, e);
+            }
             // 成功：记录成功指标
             persistSuccessCounter.increment();
             return;
         }
 
+        if (processingKey != null) {
+            try {
+                redisTemplate.expire(processingKey, RedisConstant.PROCESSING_KEY_TTL_MINUTES, TimeUnit.MINUTES);
+            } catch (Exception e) {
+                log.warn("[持久化] 延长Redis TTL失败", e);
+            }
+        }
         // 失败：入队并记录失败指标
-        addToRetryQueue(bizId, type, params);
+        Object[] taskParams = Arrays.copyOfRange(params, 1, params.length);
         persistFailCounter.increment();
         sendAlarm(bizId, type + " 持久化失败，已加入重试队列");
     }
@@ -115,25 +138,6 @@ public class AsyncPersistService {
     }
 
     /**
-     * 将失败任务加入Redis重试队列
-     */
-    private void addToRetryQueue(String bizId, String type, Object... params) {
-        try {
-            PersistRetryTask task = PersistRetryTask.builder()
-                    .bizId(bizId)
-                    .type(type)
-                    .params(params)
-                    .createTime(LocalDateTime.now())
-                    .retryCount(0)
-                    .build();
-            redisTemplate.opsForList().rightPush(PERSIST_RETRY_QUEUE, JsonUtils.toJson(task));
-        } catch (Exception e) {
-            log.error("[持久化] 业务[{}] 加入重试队列失败", bizId, e);
-            sendAlarm(bizId, "加入重试队列失败，需人工处理");
-        }
-    }
-
-    /**
      * 发送告警
      */
     public void sendAlarm(String bizId, String msg) {
@@ -146,15 +150,5 @@ public class AsyncPersistService {
         } catch (InterruptedException ie) {
             Thread.currentThread().interrupt();
         }
-    }
-
-    @Data
-    @Builder
-    public static class PersistRetryTask {
-        private String bizId;
-        private String type;
-        private Object[] params;
-        private LocalDateTime createTime;
-        private int retryCount;
     }
 }

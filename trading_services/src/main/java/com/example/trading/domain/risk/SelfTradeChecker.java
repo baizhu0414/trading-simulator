@@ -60,8 +60,15 @@ public class SelfTradeChecker {
      */
     public void putCache(Order order) {
         String cacheKey = buildKey(order);
-        selfTradeCache.put(cacheKey, order.getSide());
-        log.info("订单{}已记入风控缓存", order.getClOrderId());
+        // 仅当缓存不存在且订单非终态时才设置
+        if (order.getStatus() != null && !order.getStatus().isFinalStatus()) {
+            SideEnum existing = selfTradeCache.putIfAbsent(cacheKey, order.getSide());
+            if (existing == null) {
+                log.info("订单{}已记入风控缓存（恢复）", order.getClOrderId());
+            } else {
+                log.info("订单{}风控缓存已存在，跳过覆盖（恢复）", order.getClOrderId());
+            }
+        }
     }
 
     /**

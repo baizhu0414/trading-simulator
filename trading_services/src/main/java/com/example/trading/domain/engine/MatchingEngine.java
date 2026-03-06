@@ -16,6 +16,7 @@ import lombok.Data;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Component;
 
 import java.math.BigDecimal;
@@ -34,6 +35,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 @RequiredArgsConstructor
 public class MatchingEngine {
     private final OrderBook orderBook;
+    private final StringRedisTemplate redisTemplate;
     private final PriceGenerator priceGenerator;
     @Value("${trading.matching.zero-share-enable:false}")
     private boolean zeroShareEnable;
@@ -63,7 +65,7 @@ public class MatchingEngine {
     /**
      * 被动撮合：新订单进入交易所的核心逻辑
      */
-    @Timed(value = "trading.order.match.time", description = "订单撮合耗时")
+    @Timed(value = "trading.order.match.time", description = "订单撮合耗时，在order过程中")
     public MatchingResult match(Order newOrder) {
         String securityId = newOrder.getSecurityId();
         SideEnum newOrderSide = newOrder.getSide();
@@ -318,18 +320,12 @@ public class MatchingEngine {
     }
 
     /**
-     * 处理撤单请求
+     * 处理撤单请求：删除订单簿中的处理过程中的订单。Redis中的processing订单不需处理。
      */
     public boolean handleCancelOrder(Order order) {
         cancelRequestTotalCounter.increment();
         String clOrderId = order.getClOrderId();
         log.info("开始处理订单[{}]的全量撤单请求", clOrderId);
-
-        Order orderInBook = orderBook.findOrderByClOrderId(clOrderId);
-        if (orderInBook == null) {
-            log.warn("订单[{}]不在订单簿中，无法执行全量撤单", clOrderId);
-            return false;
-        }
 
         boolean removeSuccess = orderBook.removeOrder(order);
         if (removeSuccess) {

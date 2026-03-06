@@ -3,14 +3,15 @@ package com.example.trading.application;
 import com.example.trading.application.response.BaseResponse;
 import com.example.trading.application.response.CancelConfirmResponse;
 import com.example.trading.application.response.CancelRejectResponse;
+import com.example.trading.common.RedisConstant;
 import com.example.trading.common.enums.ErrorCodeEnum;
 import com.example.trading.common.enums.OrderStatusEnum;
 import com.example.trading.common.enums.ResponseCodeEnum;
 import com.example.trading.domain.engine.MatchingEngine;
+import com.example.trading.domain.engine.OrderBook;
 import com.example.trading.domain.model.CancelOrder;
 import com.example.trading.domain.model.Order;
 import com.example.trading.domain.validation.CancelValidator;
-import com.example.trading.mapper.OrderMapper;
 import com.example.trading.util.JsonUtils;
 import io.micrometer.core.annotation.Timed;
 import io.micrometer.core.instrument.Counter;
@@ -31,7 +32,7 @@ import java.util.List;
 public class CancelService {
     private final CancelValidator cancelValidator;
     private final MatchingEngine matchingEngine;
-    private final OrderMapper orderMapper;
+    private final OrderBook orderBook;
     private final AsyncPersistService asyncPersistService;
     private final MeterRegistry meterRegistry;
 
@@ -55,7 +56,6 @@ public class CancelService {
     /**
      * 撤单处理入口
      */
-    @Timed(value = "trading.cancel.process.time", description = "撤单处理总耗时")
     public BaseResponse processCancel(String cancelJson) {
         CancelOrder cancelOrder = null;
         String origClOrderId = null;
@@ -65,7 +65,7 @@ public class CancelService {
             origClOrderId = cancelOrder.getOrigClOrderId();
 
             cancelTotalCounter.increment();
-            return processCancelInTransaction(cancelOrder);
+            return processCancelInMemory(cancelOrder);
 
         } catch (IllegalArgumentException e) {
             log.error("撤单请求参数格式错误：{}", e.getMessage());
@@ -82,8 +82,9 @@ public class CancelService {
     /**
      * 处理撤单核心逻辑
      */
-    public BaseResponse processCancelInTransaction(CancelOrder cancelOrder) {
+    public BaseResponse processCancelInMemory(CancelOrder cancelOrder) {
         String origClOrderId = cancelOrder.getOrigClOrderId();
+        String processingKey = RedisConstant.ORDER_PROCESSING_PREFIX + origClOrderId;
 
         try {
             // 基础格式校验
@@ -95,11 +96,11 @@ public class CancelService {
             }
 
             // 查询原订单
-            Order originOrder = orderMapper.selectByClOrderId(origClOrderId).orElse(null);
+            Order originOrder = orderBook.findOrderByClOrderId(origClOrderId);
             if (originOrder == null) {
-                log.warn("撤单请求失败：原订单[{}]不存在", origClOrderId);
+                log.warn("撤单请求失败：原订单[{}]在订单簿中", origClOrderId);
                 cancelRejectCounter.increment();
-                return CancelRejectResponse.build(origClOrderId, origClOrderId, ErrorCodeEnum.ORIGIN_ORDER_NOT_EXIST);
+                return CancelRejectResponse.build(origClOrderId, origClOrderId, ErrorCodeEnum.ORDER_NOT_IN_ORDER_BOOK);
             }
 
             // 业务校验：撤单信息与原订单一致性校验
@@ -128,12 +129,11 @@ public class CancelService {
             originOrder.setStatus(OrderStatusEnum.CANCELED);
 
             // 先告诉用户撤单成功了
-            cancelValidator.markOrderAsCanceled(origClOrderId);
             cancelSuccessCounter.increment();
             BaseResponse response = buildCancelConfirmResponse(cancelOrder, originOrder);
 
             // 后台慢慢更新数据库
-            asyncPersistService.persistCancel(originOrder);
+            asyncPersistService.persistCancel(originOrder, processingKey);
 
             log.info("撤单[{}]内存处理完成，极速返回", origClOrderId);
             return response;

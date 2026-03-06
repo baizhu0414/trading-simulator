@@ -20,6 +20,13 @@ public interface OrderMapper {
      */
     int insert(Order order);
 
+    int batchUpsert(@Param("orders") List<Order> orders);
+
+    /**
+     * 仅用于布隆过滤器查ID
+     */
+    List<String> selectAllClOrderIds();
+
     /**
      * 根据业务单号查询订单
      */
@@ -49,4 +56,12 @@ public interface OrderMapper {
      * 查询所有未完成的订单（PROCESSING/MATCHING/NOT_FILLED）
      */
     List<Order> selectUnfinishedOrders();
+
+    /**
+     * 根据 clOrderId 强制更新状态和其他必要字段，忽略乐观锁版本
+     * 用于解决撤单和下单持久化的时序竞争问题
+     * @param order
+     * @return
+     */
+    int forceUpdateStatusByClOrderId(@Param("order") Order order);
 }

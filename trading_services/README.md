@@ -141,6 +141,7 @@
 ---
 ### 2.4 Java模块测试案例全量设计
 - [测试案例设计文档目录](docs/test-cases)（TestCase-0*是具体功能的案例设计）
+- [压力测试脚本测试&修改](docs/stress_test/02-压测设计文档.md)
 
 ---
 ### 2.5 通过IPC对接native模块（TODO）

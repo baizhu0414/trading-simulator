@@ -24,8 +24,6 @@ import java.util.concurrent.ConcurrentHashMap;
 public class CancelValidator {
     private static final Set<String> VALID_MARKETS = Set.of("XSHG", "XSHE", "BJSE");
 
-    // 已撤销订单缓存
-    private final ConcurrentHashMap<String, Boolean> canceledOrderCache = new ConcurrentHashMap<>();
     /* 监控指标注册器 */
     private final MeterRegistry meterRegistry;
     /* 撤单校验总次数计数器 */
@@ -50,12 +48,6 @@ public class CancelValidator {
         cancelValidateTotalCounter.increment();
         List<ErrorCodeEnum> errors = new ArrayList<>();
         String origClOrderId = cancelOrder.getOrigClOrderId();
-
-        if (canceledOrderCache.containsKey(origClOrderId)) {
-            log.warn("撤单请求失败：原订单[{}]已撤销（缓存命中）", origClOrderId);
-            errors.add(ErrorCodeEnum.ORDER_NOT_CANCELABLE);
-            return errors;
-        }
 
         // 必填字段非空校验
         if (origClOrderId == null || origClOrderId.isEmpty()) {
@@ -109,11 +101,4 @@ public class CancelValidator {
         return errors;
     }
 
-    /**
-     * 撤单成功后，将订单号加入缓存
-     */
-    public void markOrderAsCanceled(String origClOrderId) {
-        canceledOrderCache.put(origClOrderId, true);
-        log.info("已将订单[{}]加入已撤销缓存", origClOrderId);
-    }
 }
