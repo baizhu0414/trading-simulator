@@ -13,6 +13,7 @@ import com.example.trading.domain.engine.OrderBook;
 import com.example.trading.domain.model.CancelOrder;
 import com.example.trading.domain.model.Order;
 import com.example.trading.domain.validation.CancelValidator;
+import com.example.trading.gate.ThreadPoolStatusMonitor;
 import com.example.trading.util.JsonUtils;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -35,6 +36,7 @@ public class CancelService {
     private final OrderBook orderBook;
     private final AsyncPersistService asyncPersistService;
     private final ShardingMatchingExecutor shardingMatchingExecutor; // 注入分片执行器
+    private final ThreadPoolStatusMonitor threadPoolStatusMonitor;
     private final MeterRegistry meterRegistry;
 
     /* 撤单请求总次数计数器 */
@@ -63,6 +65,10 @@ public class CancelService {
 
         try {
             cancelOrder = JsonUtils.fromJson(cancelJson, CancelOrder.class);
+            // !!!前置校验：任意线程池满则返回繁忙!!!
+            if (threadPoolStatusMonitor.isAnyThreadPoolFull()) {
+                return CancelRejectResponse.build(ErrorCodeEnum.SYSTEM_BUSY);
+            }
             origClOrderId = cancelOrder.getOrigClOrderId();
 
             cancelTotalCounter.increment();
@@ -103,7 +109,7 @@ public class CancelService {
                 // 查询原订单
                 Order originOrder = orderBook.findOrderByClOrderId(origClOrderId);
                 if (originOrder == null) {
-                    log.warn("撤单请求失败：原订单[{}]在订单簿中", origClOrderId);
+                    log.info("撤单请求失败：原订单[{}]不在订单簿中，无效订单号", origClOrderId);
                     cancelRejectCounter.increment();
                     return CancelRejectResponse.build(origClOrderId, origClOrderId, ErrorCodeEnum.ORDER_NOT_IN_ORDER_BOOK);
                 }

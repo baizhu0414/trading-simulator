@@ -17,19 +17,29 @@ CREATE TABLE IF NOT EXISTS `t_exchange_order` (
                                     `qty` int UNSIGNED NOT NULL COMMENT '订单数量（无符号32位整数，≥0，支持零股）',
                                     `original_qty` int UNSIGNED NOT NULL COMMENT '原始订单数量（创建时固定）',
                                     `price` decimal(10,2) NOT NULL COMMENT '订单价格（避免浮点精度问题）',
-                                    `status` varchar(20) NOT NULL COMMENT '订单状态',
+                                    `status` int NOT NULL COMMENT '订单状态',
                                     `create_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '订单创建时间',
                                     `version` int(11) NOT NULL DEFAULT 0 COMMENT '乐观锁版本号（解决并发修改）',
-                                    PRIMARY KEY (`id`),
-                                    UNIQUE KEY `idx_cl_order_id` (`cl_order_id`), -- 幂等校验索引
-                                    KEY `idx_status_create_time` (`status`,`create_time`), -- 恢复查询索引
-    -- 字段规则约束（MySQL 8.0+支持，增强数据合法性）
-                                    CONSTRAINT `chk_cl_order_id_len` CHECK (LENGTH(`cl_order_id`) = 16),
-                                    CONSTRAINT `chk_shareholder_id_len` CHECK (LENGTH(`shareholder_id`) = 10),
-                                    CONSTRAINT `chk_market` CHECK (`market` IN ('XSHG', 'XSHE', 'BJSE')),
-                                    CONSTRAINT `chk_side` CHECK (`side` IN ('B', 'S')),
-                                    CONSTRAINT `chk_qty_unsigned` CHECK (`qty` >= 0)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='交易所订单表';
 
--- 新增索引（可选，优化部分成交订单查询）
-ALTER TABLE `t_exchange_order` ADD KEY `idx_securityid_status` (`security_id`, `status`);
+    -- 核心主键（InnoDB聚簇索引，必须保留）
+                                    PRIMARY KEY (`id`),
+
+    -- 业务唯一索引（核心：保证cl_order_id唯一性，适配单条订单查询/更新）
+                                    UNIQUE KEY `uk_cl_order_id` (`cl_order_id`),
+
+    -- 乐观锁更新优化索引（适配：WHERE cl_order_id = ? AND version = ?，避免回表）
+                                    KEY `idx_cl_order_id_version` (`cl_order_id`, `version`),
+
+    -- 状态+创建时间索引（适配：WHERE status IN (?) ORDER BY create_time ASC，避免filesort）
+                                    KEY `idx_status_create_time` (`status`, `create_time`),
+
+    -- 股票+状态索引（适配：撮合场景 WHERE security_id = ? AND status = ?）
+                                    KEY `idx_security_id_status` (`security_id`, `status`),
+
+    -- 原有业务约束（全部保留，保证数据合法性）
+                                    CONSTRAINT `chk_cl_order_id_len` CHECK ((length(`cl_order_id`) = 16)),
+                                    CONSTRAINT `chk_market` CHECK ((`market` in (_utf8mb4'XSHG',_utf8mb4'XSHE',_utf8mb4'BJSE'))),
+                                    CONSTRAINT `chk_qty_unsigned` CHECK ((`qty` >= 0)),
+                                    CONSTRAINT `chk_shareholder_id_len` CHECK ((length(`shareholder_id`) = 10)),
+                                    CONSTRAINT `chk_side` CHECK ((`side` in (_utf8mb4'B',_utf8mb4'S')))
+) ENGINE=InnoDB AUTO_INCREMENT=28 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='交易所订单表';

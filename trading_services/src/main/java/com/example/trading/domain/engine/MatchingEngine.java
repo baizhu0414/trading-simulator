@@ -64,40 +64,70 @@ public class MatchingEngine {
     /**
      * 被动撮合：新订单进入交易所的核心逻辑
      */
+    /**
+     * 被动撮合：新订单进入交易所的核心逻辑（修复 ConcurrentModificationException）
+     */
     @Timed(value = "trading.order.match.time", description = "订单撮合耗时，在order过程中")
     public MatchingResult match(Order newOrder) {
         String securityId = newOrder.getSecurityId();
         SideEnum newOrderSide = newOrder.getSide();
         BigDecimal newOrderPrice = newOrder.getPrice();
         int newOrderRemainingQty = newOrder.getQty();
+        boolean isNewOrderBuy = newOrderSide == SideEnum.BUY;
 
         MatchingResult matchingResult = MatchingResult.builder()
                 .matchedOrder(newOrder)
-                .matchDetails(new java.util.ArrayList<>())
+                .matchDetails(new ArrayList<>())
                 .build();
 
-        // 1. 确定对手方向
-        SideEnum oppositeSide = newOrderSide == SideEnum.BUY ? SideEnum.SELL : SideEnum.BUY;
+        // 1. 确定对手方向，获取对手方价格Map
+        SideEnum oppositeSide = isNewOrderBuy ? SideEnum.SELL : SideEnum.BUY;
         TreeMap<BigDecimal, Deque<Order>> oppositePriceMap = orderBook.getPriceMap(securityId, oppositeSide);
-        List<BigDecimal> prices = new ArrayList<>(oppositePriceMap.keySet());
 
-        // 2. 遍历对手方价格队列
-        for (BigDecimal oppositePrice : prices) {
-            if (!isPriceMatch(newOrderSide, newOrderPrice, oppositePrice)) {
+        // ✅ 核心修复1：迭代价格集合的副本，避免直接迭代原Map触发快速失败
+        List<BigDecimal> priceList = new ArrayList<>(oppositePriceMap.keySet());
+        // 按价格优先顺序排序（卖单升序，买单降序）
+        if (isNewOrderBuy) {
+            // 买单：卖单价格升序（从低到高）
+            Collections.sort(priceList);
+        } else {
+            // 卖单：买单价格降序（从高到低）
+            Collections.sort(priceList, Collections.reverseOrder());
+        }
+
+        // 2. 遍历价格副本（价格优先）
+        for (BigDecimal oppositePrice : priceList) {
+            // 提前终止：主动单已完全成交
+            if (newOrderRemainingQty <= 0) {
                 break;
             }
 
+            // 严格校验成交前提：买价≥卖价/卖价≤买价
+            if (isNewOrderBuy) {
+                if (newOrderPrice.compareTo(oppositePrice) < 0) {
+                    break; // 后续价格更高，无需遍历
+                }
+            } else {
+                if (newOrderPrice.compareTo(oppositePrice) > 0) {
+                    break; // 后续价格更低，无需遍历
+                }
+            }
+
+            // 从原Map获取订单队列（避免副本过期）
             Deque<Order> oppositeOrderQueue = oppositePriceMap.get(oppositePrice);
             if (oppositeOrderQueue == null || oppositeOrderQueue.isEmpty()) {
+                // ✅ 直接操作原Map移除空价格节点
+                oppositePriceMap.remove(oppositePrice);
                 continue;
             }
 
-            // 3. 逐个撮合对手订单
+            // 3. 同价格下，时间优先撮合
             while (!oppositeOrderQueue.isEmpty() && newOrderRemainingQty > 0) {
                 Order oppositeOrder = oppositeOrderQueue.peek();
                 int oppositeRemainingQty = oppositeOrder.getQty();
 
-                if (oppositeRemainingQty <= 0) {
+                // 零股订单直接移除
+                if (oppositeRemainingQty <= 0 || (!zeroShareEnable && oppositeRemainingQty < 100)) {
                     oppositeOrderQueue.poll();
                     continue;
                 }
@@ -107,37 +137,49 @@ public class MatchingEngine {
                 if (!zeroShareEnable) {
                     tradeQty = (tradeQty / 100) * 100;
                     if (tradeQty <= 0) {
-                        log.warn("订单[{}]与对手单[{}]可成交数量{}非100倍数，零股禁用，跳过撮合",
-                                newOrder.getClOrderId(), oppositeOrder.getClOrderId(), tradeQty);
-                        break;
+                        oppositeOrderQueue.poll();
+                        continue;
                     }
                 }
 
-                BigDecimal execPrice = priceGenerator.generatePrice(newOrder, oppositeOrder);
+                // 5. 生成成交价（被动方价格）
+                BigDecimal execPrice = oppositePrice;
 
-                log.info("撮合成交：{}单[{}]与{}单[{}]，股票[{}]，价格[{}]，成交数量[{}]，零股开关：{}",
+                log.info("撮合成交：{}主动单[{}]与{}被动单[{}]，股票[{}]，成交价[{}]，成交数量[{}]",
                         newOrderSide.getDesc(), newOrder.getClOrderId(),
                         oppositeSide.getDesc(), oppositeOrder.getClOrderId(),
-                        securityId, execPrice, tradeQty, zeroShareEnable);
+                        securityId, execPrice, tradeQty);
 
                 tradeTotalCounter.increment();
 
-                // 5. 更新新订单剩余数量、状态及订单簿
+                // 6. ✅ 核心修复2：修正参数错误，更新主动单（newOrder）而非被动单
                 newOrderRemainingQty -= tradeQty;
                 newOrder.setQty(newOrderRemainingQty);
-                updateOrderStatusAndOrderBook(newOrder, newOrderRemainingQty, newOrder.getOriginalQty());
+                updateOrderStatusAndOrderBook(newOrder, newOrderRemainingQty, newOrder.getOriginalQty(), true);
 
-                // 6. 更新对手订单剩余数量、状态及订单簿
+                // 7. 更新被动单
                 int newOppositeQty = oppositeRemainingQty - tradeQty;
                 oppositeOrder.setQty(newOppositeQty);
-                updateOrderStatusAndOrderBook(oppositeOrder, newOppositeQty, oppositeOrder.getOriginalQty());
+                updateOrderStatusAndOrderBook(oppositeOrder, newOppositeQty, oppositeOrder.getOriginalQty(), false);
 
+                // 8. 记录撮合结果
                 matchingResult.addMatchDetail(oppositeOrder, tradeQty, execPrice);
-            } // end while
-        } // end for
-        // 7. 没有任何成交：更新状态为 NOT_FILLED 并加入订单簿
-        if (newOrderRemainingQty == newOrder.getOriginalQty()) {
-            updateOrderStatusAndOrderBook(newOrder, newOrderRemainingQty, newOrder.getOriginalQty());
+
+                // 9. 被动单完全成交，从队列移除
+                if (newOppositeQty <= 0) {
+                    oppositeOrderQueue.poll();
+                }
+            }
+
+            // 10. 价格队列为空，从原Map移除该价格节点
+            if (oppositeOrderQueue.isEmpty()) {
+                oppositePriceMap.remove(oppositePrice);
+            }
+        }
+
+        // 11. 主动单未完全成交，加入订单簿
+        if (newOrderRemainingQty > 0) {
+            orderBook.addOrder(newOrder);
         }
 
         return matchingResult;
@@ -205,20 +247,22 @@ public class MatchingEngine {
     }
 
     /**
-     * 更新订单状态和OrderBook
+     * 更新订单状态,可能删除订单、更新状态等
      */
-    private void updateOrderStatusAndOrderBook(Order order, int remainingQty, int originalQty) {
+    private void updateOrderStatusAndOrderBook(Order order, int remainingQty, int originalQty, boolean isNewOrder) {
         if (remainingQty == 0) {
             order.setStatus(OrderStatusEnum.FULL_FILLED);
             orderBook.removeOrder(order);
         } else if (remainingQty < originalQty) {
             order.setStatus(OrderStatusEnum.PART_FILLED);
-            if (!orderBook.containsOrder(order)) {
+            if (isNewOrder && !orderBook.containsOrder(order)) {
                 orderBook.addOrder(order);
             }
         } else {
             order.setStatus(OrderStatusEnum.NOT_FILLED);
-            orderBook.addOrder(order);
+            if (isNewOrder) {
+                orderBook.addOrder(order);
+            }
         }
         // 更新订单簿订单总数
         orderBookOrderCount.set(orderBook.getAllOrders().size());

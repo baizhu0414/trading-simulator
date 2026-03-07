@@ -31,7 +31,7 @@
 
     <!-- 批量插入 -->
     <insert id="batchInsert" parameterType="java.util.List">
-        INSERT INTO t_exchange_trade (
+        INSERT IGNORE INTO t_exchange_trade (
         exec_id, buy_cl_order_id, sell_cl_order_id, exec_qty, exec_price, trade_time,
         market, security_id, buy_shareholder_id, sell_shareholder_id
         ) VALUES

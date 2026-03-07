@@ -173,7 +173,7 @@ if [ -f "${SPRING_BOOT_DIR}/${SPRING_BOOT_JAR}" ]; then
   # 检查应用是否已运行
   if ! pgrep -f "${SPRING_BOOT_JAR}" > /dev/null 2>&1; then
     cd "${SPRING_BOOT_DIR}" || { echo -e "${RED}目录不存在${NC}"; exit 1; }
-    nohup java -jar "${SPRING_BOOT_JAR}" > "${SPRING_BOOT_LOG}" 2>&1 &
+    nohup java -Xmx8G -Xms8G -XX:G1NewSizePercent=30 -XX:SurvivorRatio=6 -XX:MaxDirectMemorySize=2G -jar "${SPRING_BOOT_JAR}" > "${SPRING_BOOT_LOG}" 2>&1 &
     sleep 2  # 应用启动稍慢，等待2秒
     if pgrep -f "${SPRING_BOOT_JAR}" > /dev/null 2>&1; then
       echo -e "${GREEN}成功${NC}"
