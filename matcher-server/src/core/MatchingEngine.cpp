@@ -35,8 +35,26 @@ namespace matcher
                                                 ", 价格=" + std::to_string(order.price) +
                                                 ", 数量=" + std::to_string(order.qty));
 
-            OrderBook *book = getOrCreateBook(order.securityId);
-            auto trades = book->submit(order);
+            // 参数校验
+            if (order.qty <= 0)
+            {
+                matcher::util::Logger::logOrder(order.clOrderId, "订单数量非法，拒绝订单");
+                matcher::model::Order rejected = order;
+                rejected.status = "REJECTED";
+                if (persistence_)
+                {
+                    persistence_->updateOrder(rejected);
+                }
+                return;
+            }
+
+            // 标记为撮合中
+            matcher::model::Order incoming = order;
+            incoming.status = "MATCHING";
+
+            // 执行撮合
+            
+            auto trades = matchOrder(incoming);
 
             // 记录撮合结果
             if (!trades.empty())
@@ -158,6 +176,26 @@ namespace matcher
             if (it == books_.end())
                 return {};
             return it->second->snapshot();
+        }
+
+        //  撮合逻辑实现
+        std::vector<matcher::model::Trade> MatchingEngine::matchOrder(matcher::model::Order& order) {
+            std::lock_guard<std::recursive_mutex> lock(engineMutex_);
+            
+            if (order.qty <= 0) {
+                matcher::util::Logger::logOrder(order.clOrderId, "订单数量非法，拒绝撮合");
+                return {};
+            }
+            
+            try {
+                OrderBook* book = getOrCreateBook(order.securityId);
+                return book->matchOrder(order);
+            } catch (const std::exception& e) {
+                matcher::util::Logger::logOrder(order.clOrderId, 
+                    "撮合订单[" + order.clOrderId + "]时发生异常: " + std::string(e.what()));
+                order.status = "REJECTED";
+                return {};
+            }
         }
 
         // 工厂函数实现

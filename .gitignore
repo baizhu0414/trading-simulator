@@ -1,3 +1,9 @@
-trading-simulator\matcher-server\build
-.vscode
-.\logs\**
+# Build directories
+matcher-server/build/
+.vscode/
+repo.bundle
+
+# Log directories - merged from both versions
+logs/
+matcher-server/logs/
+./logs/**
