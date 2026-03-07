@@ -3,8 +3,6 @@
 #include <algorithm>
 #include <iostream>
 #include <chrono>
-#include <queue>
-#include <map>
 
 namespace matcher
 {
@@ -29,7 +27,7 @@ namespace matcher
 
         void MatchingEngine::submitOrder(const matcher::model::Order &order)
         {
-            std::lock_guard<std::recursive_mutex> lock(engineMutex_);
+            std::lock_guard<std::mutex> lock(engineMutex_);
 
             matcher::util::Logger::logOrder(order.clOrderId,
                                             "提交订单: 证券=" + order.securityId +
@@ -70,7 +68,7 @@ namespace matcher
                                                 "订单进入订单簿等待撮合");
             }
 
-            // 为每笔成交持久化并通知
+            // persist and notify for each trade
             for (const auto &t : trades)
             {
                 if (persistence_)
@@ -89,46 +87,15 @@ namespace matcher
                 }
             }
 
-            // 计算该订单在订单簿中的剩余量（若存在）
-            int remainingQty = 0;
-            auto snapshot = getOrderBook(order.securityId);
-            for (const auto &o : snapshot)
-            {
-                if (o.clOrderId == order.clOrderId)
-                {
-                    remainingQty = o.qty;
-                    break;
-                }
-            }
-
-            // 更新订单状态并持久化（best-effort）
-            matcher::model::Order updated = order;
-            updated.qty = remainingQty;
-            if (!trades.empty())
-            {
-                if (remainingQty <= 0)
-                    updated.status = "FULL_FILLED";
-                else
-                    updated.status = "PART_FILLED";
-            }
-            else
-            {
-                // 未撮合到成交，处于挂单状态（MATCHING）
-                updated.status = "MATCHING";
-            }
-
-            if (persistence_)
-            {
-                matcher::util::Logger::logOrder(order.clOrderId, "更新订单状态到持久层: " + updated.status);
-                persistence_->updateOrder(updated);
-            }
+            // update orders if persistence supports it (best-effort)
+            // note: OrderBook currently updates quantities in-place in its structures
 
             matcher::util::Logger::logOrder(order.clOrderId, "订单处理完成");
         }
 
         bool MatchingEngine::cancelOrder(const std::string &clOrderId)
         {
-            std::lock_guard<std::recursive_mutex> lock(engineMutex_);
+            std::lock_guard<std::mutex> lock(engineMutex_);
 
             matcher::util::Logger::logOrder(clOrderId, "尝试取消订单");
 
@@ -153,7 +120,7 @@ namespace matcher
             const std::vector<matcher::model::Order> &sellOrders)
         {
 
-            std::lock_guard<std::recursive_mutex> lock(engineMutex_);
+            std::lock_guard<std::mutex> lock(engineMutex_);
 
             matcher::util::Logger::logSys("MatchingEngine::matchBatch",
                                           "开始批量撮合: 市场=" + market +
@@ -204,7 +171,7 @@ namespace matcher
 
         std::vector<matcher::model::Order> MatchingEngine::getOrderBook(const std::string &securityId) const
         {
-            std::lock_guard<std::recursive_mutex> lock(engineMutex_);
+            std::lock_guard<std::mutex> lock(engineMutex_);
             auto it = books_.find(securityId);
             if (it == books_.end())
                 return {};

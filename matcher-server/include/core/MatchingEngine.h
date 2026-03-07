@@ -35,13 +35,9 @@ private:
 
     // one orderbook per security
     std::unordered_map<std::string, std::unique_ptr<OrderBook>> books_;
-    mutable std::recursive_mutex engineMutex_;
+    mutable std::mutex engineMutex_;
 
     OrderBook* getOrCreateBook(const std::string& securityId);
-
-    // 撮合逻辑核心方法
-    std::vector<matcher::model::Trade> matchOrder(matcher::model::Order& order);
-    
 };
 
 // 工厂函数实现将在 cpp 中提供

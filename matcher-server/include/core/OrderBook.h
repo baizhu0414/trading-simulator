@@ -4,7 +4,6 @@
 #include <vector>
 #include <string>
 #include <mutex>
-#include <queue>
 #include "model/Order.h"
 #include "model/Trade.h"
 

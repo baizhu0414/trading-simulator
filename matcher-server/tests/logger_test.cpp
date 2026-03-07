@@ -6,7 +6,7 @@
 
 int main() {
     using namespace matcher::util;
-    // 确保日志目录存在
+    // ensure logs dir exists
     std::filesystem::create_directories("logs");
 
     if (!Logger::init("{}")) {
@@ -20,7 +20,7 @@ int main() {
     Logger::logError("logger_test", "An example error");
     Logger::logTrace("test_op", 42);
 
-    // 给工作线程时间刷新
+    // Give worker thread time to flush
     std::this_thread::sleep_for(std::chrono::milliseconds(500));
 
     Logger::shutdown();
