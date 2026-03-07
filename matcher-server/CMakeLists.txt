@@ -1,5 +1,11 @@
 cmake_minimum_required(VERSION 3.20)
 
+# 自动检测 vcpkg 工具链
+if(NOT DEFINED CMAKE_TOOLCHAIN_FILE AND DEFINED ENV{VCPKG_ROOT})
+    set(CMAKE_TOOLCHAIN_FILE "$ENV{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake"
+        CACHE STRING "Vcpkg toolchain file")
+endif()
+
 project(MatcherServer VERSION 0.1.0 LANGUAGES CXX)
 
 # 设置 C++ 标准 (C++17 是现代金融交易系统的基准)
@@ -31,7 +37,6 @@ find_package(GTest CONFIG REQUIRED)
 find_package(unofficial-libmysql REQUIRED)
 
 # 使用 cpp-httplib (Header-only library, typically available via CONFIG or module mode)
-# cpp-httplib vcpkg port provides the package name `httplib`
 find_package(httplib CONFIG REQUIRED)
 
 # 包含头文件目录
@@ -48,11 +53,12 @@ add_library(matcher_core
 )
 # 指定头文件搜索路径
 target_include_directories(matcher_core PUBLIC include)
-# 链接依赖
-target_link_libraries(matcher_core PRIVATE 
+# 链接依赖 #PUBLIC 表示这些库会传播给依赖 matcher_core 的目标，解决头文件路径问题
+target_link_libraries(matcher_core PUBLIC 
     nlohmann_json::nlohmann_json 
     spdlog::spdlog 
-    httplib::httplib               # HTTP library target (cpp-httplib provides `httplib`)
+    unofficial::libmysql::libmysql # vcpkg 中 libmysql 暴露的 target
+    httplib::httplib               # HTTP library target
 )
 # Link MySQL client as PUBLIC so its include directories propagate to executables
 target_link_libraries(matcher_core PUBLIC unofficial::libmysql::libmysql)
