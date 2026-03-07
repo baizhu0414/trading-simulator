@@ -1,2 +1,5 @@
 trading-simulator\matcher-server\build
 .vscode
+logs
+matcher-server/logs/
+repo.bundle

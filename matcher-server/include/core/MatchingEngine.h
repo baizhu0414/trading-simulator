@@ -42,11 +42,6 @@ private:
     // 撮合逻辑核心方法
     std::vector<matcher::model::Trade> matchOrder(matcher::model::Order& order);
     
-    // 辅助方法
-    bool isPriceMatch(const std::string& side, double newOrderPrice, double counterPrice);
-    void executeMatch(matcher::model::Order& newOrder, matcher::model::Order& counterOrder, int matchQty, double matchPrice);
-    void updateNewOrderStatus(matcher::model::Order& order, int remainingQty);
-    double generatePrice(const matcher::model::Order& newOrder, const matcher::model::Order& counterOrder);
 };
 
 // 工厂函数实现将在 cpp 中提供
