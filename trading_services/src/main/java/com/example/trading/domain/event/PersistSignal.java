@@ -24,8 +24,4 @@ public class PersistSignal {
     private List<Trade> trades; // 订单+交易场景
     private Order canceledOrder; // 撤单场景
     private List<MatchingEngine.RecoveryMatchResult> recoveryResults; // 恢复结果场景
-
-    // 扩展字段
-    private long createTime = System.currentTimeMillis();
-    private boolean processed = false;
 }

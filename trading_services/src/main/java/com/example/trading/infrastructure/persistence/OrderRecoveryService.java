@@ -142,7 +142,7 @@ public class OrderRecoveryService implements CommandLineRunner {
                     }
                     List<ErrorCodeEnum> validateErrors = orderValidator.validate(order);
                     if (!validateErrors.isEmpty()) {
-                        log.warn("【订单恢复】订单[{}]校验失败，跳过", order.getClOrderId());
+                        log.warn("【订单恢复】订单[{}]校验失败，跳过 {}", order.getClOrderId(), validateErrors);
                         totalRecoverSkipped++;
                         continue;
                     }
@@ -219,7 +219,9 @@ public class OrderRecoveryService implements CommandLineRunner {
                 shardingMatchingExecutor.submitAsync(secId, () -> {
                     try {
                         log.info("【订单恢复】线程[{}]开始主动撮合股票[{}]", Thread.currentThread().getName(), secId);
+
                         List<MatchingEngine.RecoveryMatchResult> results = matchingEngine.matchOrderBookOrders(secId);
+
                         if (results != null && !results.isEmpty()) {
                             allRecoveryResults.addAll(results);
                             log.info("【订单恢复】股票[{}]主动撮合产生 {} 笔成交", secId, results.size());

@@ -3,20 +3,17 @@
         "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
 
 <mapper namespace="com.example.trading.mapper.OrderMapper">
-    <!-- 通用结果映射 -->
+    <!-- 通用结果映射：status保留EnumOrdinalTypeHandler（适配数据库存数字） -->
     <resultMap id="OrderResultMap" type="com.example.trading.domain.model.Order">
         <id column="id" property="id"/>
         <result column="cl_order_id" property="clOrderId"/>
         <result column="shareholder_id" property="shareholderId"/>
         <result column="market" property="market"/>
         <result column="security_id" property="securityId"/>
-
         <result column="side" property="side" typeHandler="com.example.trading.common.typehandler.SideEnumTypeHandler"/>
-
         <result column="original_qty" property="originalQty"/>
         <result column="qty" property="qty"/>
         <result column="price" property="price"/>
-
         <result column="status" property="status" typeHandler="org.apache.ibatis.type.EnumOrdinalTypeHandler"/>
         <result column="create_time" property="createTime"/>
         <result column="version" property="version"/>
@@ -25,44 +22,60 @@
     <!-- 插入订单，存在则更新 -->
     <insert id="insert" parameterType="com.example.trading.domain.model.Order" useGeneratedKeys="true" keyProperty="id">
         INSERT INTO t_exchange_order (
-        cl_order_id, shareholder_id, market, security_id,
-        side, original_qty, qty, price, status, create_time, version
+            cl_order_id, shareholder_id, market, security_id,
+            side, original_qty, qty, price, status, create_time, version
         ) VALUES (
-        #{clOrderId}, #{shareholderId}, #{market}, #{securityId},
-        #{side,typeHandler=com.example.trading.common.typehandler.SideEnumTypeHandler},
-        #{originalQty}, #{qty}, #{price},
-        #{status,typeHandler=org.apache.ibatis.type.EnumOrdinalTypeHandler},
-        #{createTime}, #{version}
-        )
-        ON DUPLICATE KEY UPDATE
-        qty = VALUES(qty),          <!-- 更新剩余数量 -->
-        status = VALUES(status),    <!-- 更新订单状态 -->
-        version = version + 1       <!-- 乐观锁版本号自增 -->
+                     #{clOrderId}, #{shareholderId}, #{market}, #{securityId},
+                     #{side,typeHandler=com.example.trading.common.typehandler.SideEnumTypeHandler},
+                     #{originalQty}, #{qty}, #{price},
+                     #{status,typeHandler=org.apache.ibatis.type.EnumOrdinalTypeHandler},
+                     #{createTime}, #{version}
+                 )
+            ON DUPLICATE KEY UPDATE
+                                 qty = VALUES(qty),
+                                 status = VALUES(status),
+                                 version = version + 1
     </insert>
 
-    <insert id="batchUpsert" parameterType="java.util.List" useGeneratedKeys="true" keyProperty="id">
-        INSERT INTO t_exchange_order (
-        cl_order_id, shareholder_id, market, security_id,
-        side, original_qty, qty, price, status, create_time, version
-        ) VALUES
-        <foreach collection="orders" item="item" separator=",">
-            (
-            #{item.clOrderId}, #{item.shareholderId}, #{item.market}, #{item.securityId},
-            #{item.side, typeHandler=com.example.trading.common.typehandler.SideEnumTypeHandler},
-            #{item.originalQty}, #{item.qty}, #{item.price},
-            #{item.status, typeHandler=org.apache.ibatis.type.EnumOrdinalTypeHandler},
-            #{item.createTime}, #{item.version}
-            )
-        </foreach>
-        ON DUPLICATE KEY UPDATE
-        qty = VALUES(qty),
-        status = VALUES(status),
-        original_qty = VALUES(original_qty),
+    <update id="updateStatusQtyVersionById" parameterType="com.example.trading.domain.model.Order">
+        UPDATE t_exchange_order
+        SET
+        qty = #{qty},
+        status = #{status,typeHandler=org.apache.ibatis.type.EnumOrdinalTypeHandler},
         version = version + 1
-    </insert>
+        WHERE cl_order_id = #{clOrderId}
+    </update>
 
-    <!-- 纯批量插入订单（无冲突更新，仅插入新数据） -->
-    <insert id="batchInsert" parameterType="java.util.List" useGeneratedKeys="true" keyProperty="id">
+    <update id="batchUpdateStatusQtyVersionById" parameterType="java.util.List">
+        UPDATE t_exchange_order
+        SET
+        qty = CASE cl_order_id
+        <foreach collection="orders" item="order" separator="">
+            WHEN #{order.clOrderId} THEN #{order.qty}
+        </foreach>
+        END,
+        status = CASE cl_order_id
+        <foreach collection="orders" item="order" separator="">
+            WHEN #{order.clOrderId} THEN #{order.status,typeHandler=org.apache.ibatis.type.EnumOrdinalTypeHandler}
+        </foreach>
+        END,
+        version = version + 1
+        WHERE cl_order_id IN
+        <foreach collection="orders" item="order" open="(" separator="," close=")">
+            #{order.clOrderId}
+        </foreach>
+    </update>
+
+    <select id="selectByClOrderIds" parameterType="java.util.List" resultMap="OrderResultMap">
+        SELECT cl_order_id, id, version
+        FROM t_exchange_order
+        WHERE cl_order_id IN
+        <foreach collection="clOrderIds" item="clOrderId" open="(" separator="," close=")">
+            #{clOrderId}
+        </foreach>
+    </select>
+
+    <insert id="batchInsert" parameterType="java.util.List">
         INSERT INTO t_exchange_order (
         cl_order_id, shareholder_id, market, security_id,
         side, original_qty, qty, price, status, create_time, version
@@ -73,7 +86,7 @@
             #{item.side, typeHandler=com.example.trading.common.typehandler.SideEnumTypeHandler},
             #{item.originalQty}, #{item.qty}, #{item.price},
             #{item.status, typeHandler=org.apache.ibatis.type.EnumOrdinalTypeHandler},
-            #{item.createTime}, #{item.version}
+            #{item.createTime}, #{item.version}+1
             )
         </foreach>
     </insert>
@@ -82,12 +95,11 @@
         SELECT cl_order_id FROM t_exchange_order
     </select>
 
-    <!-- 根据业务单号查询订单 -->
     <select id="selectByClOrderId" parameterType="String" resultMap="OrderResultMap">
         SELECT * FROM t_exchange_order WHERE cl_order_id = #{clOrderId}
     </select>
 
-    <!-- 根据状态列表查询订单 -->
+    <!-- 修正3：collection="statusList" 匹配接口@Param("statusList") -->
     <select id="selectByStatusIn" parameterType="java.util.List" resultMap="OrderResultMap">
         SELECT * FROM t_exchange_order
         WHERE status IN
@@ -97,57 +109,76 @@
         ORDER BY create_time ASC
     </select>
 
-    <!-- 更新订单 -->
-    <update id="updateById" parameterType="com.example.trading.domain.model.Order">
+    <!-- 修正4：collection="statusList" 匹配接口@Param("statusList") -->
+    <select id="selectPartByStatusIn" parameterType="java.util.List" resultMap="OrderResultMap">
+        SELECT cl_order_id, status, original_qty, qty, create_time
+        FROM t_exchange_order
+        WHERE status IN
+        <foreach collection="statusList" item="status" open="(" separator="," close=")">
+            #{status,typeHandler=org.apache.ibatis.type.EnumOrdinalTypeHandler}
+        </foreach>
+        ORDER BY create_time ASC
+    </select>
+
+    <update id="updateTradedOrderByOrderId" parameterType="com.example.trading.domain.model.Order">
         UPDATE t_exchange_order
         SET
-            qty = #{qty}, -- 剩余数量
+            qty = #{qty},
             status = #{status,typeHandler=org.apache.ibatis.type.EnumOrdinalTypeHandler},
-            version = version + 1 -- 版本号自增
-        WHERE id = #{id} AND version = #{version} -- 乐观锁条件
+            version = version + 1
+        WHERE cl_order_id = #{clOrderId} AND version = #{version}
     </update>
 
-    <!-- 批量更新订单 -->
-    <update id="batchUpdateById" parameterType="java.util.List">
+    <update id="batchUpdateTradeOrderByOrderId" parameterType="java.util.List">
         UPDATE t_exchange_order
         SET
-        qty = CASE id
+        qty = CASE cl_order_id
         <foreach collection="orders" item="order" separator="">
-            WHEN #{order.id} THEN #{order.qty}
+            WHEN #{order.clOrderId} THEN #{order.qty}
         </foreach>
         END,
-        status = CASE id
+        status = CASE cl_order_id
         <foreach collection="orders" item="order" separator="">
-            WHEN #{order.id} THEN #{order.status,typeHandler=org.apache.ibatis.type.EnumOrdinalTypeHandler}
+            WHEN #{order.clOrderId} THEN #{order.status,typeHandler=org.apache.ibatis.type.EnumOrdinalTypeHandler}
         </foreach>
         END,
         version = version + 1
-        WHERE id IN
+        WHERE
+        -- 业务主键范围
+        cl_order_id IN
         <foreach collection="orders" item="order" open="(" separator="," close=")">
-            #{order.id}
+            #{order.clOrderId}
         </foreach>
-        AND version IN
+        -- 核心修正2：乐观锁条件关联 cl_order_id + version，避免脏写
+        AND (
+        <foreach collection="orders" item="order" separator="OR">
+            (cl_order_id = #{order.clOrderId} AND version = #{order.version})
+        </foreach>
+        )
+    </update>
+
+    <update id="batchUpdateCancelOrderByOrderId" parameterType="java.util.List">
+        UPDATE t_exchange_order
+        SET
+        qty = CASE cl_order_id
+        <foreach collection="orders" item="order" separator="">
+            WHEN #{order.clOrderId} THEN #{order.qty}
+        </foreach>
+        END,
+        status = CASE cl_order_id
+        <foreach collection="orders" item="order" separator="">
+            WHEN #{order.clOrderId} THEN #{order.status,typeHandler=org.apache.ibatis.type.EnumOrdinalTypeHandler}
+        </foreach>
+        END,
+        version = version + 1
+        WHERE cl_order_id IN
         <foreach collection="orders" item="order" open="(" separator="," close=")">
-            #{order.version}
+            #{order.clOrderId}
         </foreach>
     </update>
 
-    <!-- 判断订单是否存在 -->
     <select id="existsByClOrderId" parameterType="String" resultType="boolean">
         SELECT COUNT(1) > 0 FROM t_exchange_order WHERE cl_order_id = #{clOrderId}
     </select>
 
-    <select id="selectUnfinishedOrders" resultMap="OrderResultMap">
-        SELECT * FROM t_exchange_order
-        WHERE status IN (0, 2, 3, 4)
-    </select>
-
-    <update id="forceUpdateStatusByClOrderId">
-        UPDATE orders
-        SET status = #{order.status},
-        qty = #{order.qty},
-        update_time = NOW()
-        <!-- 注意：这里不要更新 version，或者 version + 1，视业务需求 -->
-        WHERE cl_order_id = #{order.clOrderId}
-    </update>
 </mapper>

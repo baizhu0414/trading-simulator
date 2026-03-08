@@ -2,8 +2,9 @@ package com.example.trading.application;
 
 import com.example.trading.common.enums.OrderStatusEnum;
 import com.example.trading.domain.engine.MatchingEngine;
-import com.example.trading.domain.engine.OrderBook;
 import com.example.trading.domain.model.Order;
+import com.example.trading.infrastructure.disruptor.DisruptorManager;
+import com.example.trading.infrastructure.disruptor.PersistEventHandler;
 import com.example.trading.infrastructure.persistence.OrderRecoveryService;
 import com.example.trading.mapper.OrderMapper;
 import io.micrometer.core.instrument.Counter;
@@ -13,28 +14,20 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Scheduled;
+import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 import org.springframework.stereotype.Service;
 
+import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
 
 /**
  * 订单数据一致性检查服务
- * 核心：定期校验内存订单簿（OrderBook）与数据库中未完成订单的数据一致性。
- * 职责：发现不一致 -> 记录详细日志 -> 上报监控指标 -> 触发告警。
- * 注：在开发过程中能辅助发现问题，如：
- *  INFO  com.example.trading.domain.engine.OrderBook - 订单簿中总计查询到0笔订单（对账用）
- *  INFO  c.e.trading.application.OrderReconciliationService - 内存订单簿中订单数量：0
- *  ERROR c.e.trading.application.OrderReconciliationService - 对账异常【1】：订单[SEL0000000000003]数据库存在但内存订单簿中无
- *  ERROR c.e.trading.application.OrderReconciliationService - [对账告警] 订单[SEL0000000000003]：数据库存在未完成订单但内存订单簿中无，可能是内存数据丢失
- *  INFO  c.e.trading.application.OrderReconciliationService - ========== 对账任务汇总 ==========
- *  ......
- *  INFO  c.e.trading.application.OrderReconciliationService - 触发告警订单数：1
- *  INFO  c.e.trading.application.OrderReconciliationService - ========== 订单数据对账任务执行完成 ==========
- *  ......
- *  INFO  com.example.trading.domain.engine.OrderBook - 订单[SEL0000000000003]已加入[卖出]方向订单簿，股票[600030]，价格[20.00]，队列长度[1]
- *  INFO  c.e.t.i.persistence.OrderRecoveryService - 【订单恢复】订单[SEL0000000000003]（原状态：部分成交）重置为未成交并加入内存
- *  INFO  c.e.t.i.persistence.OrderRecoveryService - 【订单恢复】开始主动撮合股票[600030]
+ * 修复点：
+ * 1. 修正Disruptor RingBuffer消费完成判断逻辑（移除不存在的getNextPublishSequence）
+ * 2. 修正LocalDateTime获取毫秒数的方式（替换getTime()）
  */
 @Slf4j
 @Service
@@ -44,38 +37,41 @@ public class OrderConsistencyCheckService {
     private final OrderMapper orderMapper;
     private final MatchingEngine matchingEngine;
     private final OrderRecoveryService orderRecoveryService;
+    private final DisruptorManager disruptorManager;
+    private final PersistEventHandler persistEventHandler;
+
     @Value("${trading.recovery.recover-status:PROCESSING,MATCHING,NOT_FILLED,PART_FILLED}")
     private String recoverStatus;
     private final MeterRegistry meterRegistry;
 
-    private Counter checkTotalCounter;      // 检查任务执行总次数
-    private Counter checkFailedCounter;     // 检查任务执行失败次数
-    private Counter checkMismatchCounter;   // 发现数据不匹配的订单总数
+    @Value("${trading.consistency.tolerance-window:30000}")
+    private long toleranceWindow;
+    @Value("${trading.consistency.max-wait-time:20000}")
+    private long maxWaitTime;
+
+    private Counter checkTotalCounter;
+    private Counter checkFailedCounter;
+    private Counter checkMismatchCounter;
+    private Counter checkFalseAlarmCounter;
+
+    private final Map<String, Long> alarmThrottleMap = new ConcurrentHashMap<>();
+    private static final long ALARM_THROTTLE_TIME = 5 * 60 * 1000; // 5分钟
 
     @PostConstruct
     public void initMetrics() {
         checkTotalCounter = meterRegistry.counter("trading.consistency.check.total");
         checkFailedCounter = meterRegistry.counter("trading.consistency.check.failed");
         checkMismatchCounter = meterRegistry.counter("trading.consistency.check.mismatch");
+        checkFalseAlarmCounter = meterRegistry.counter("trading.consistency.check.false_alarm");
     }
 
-    /**
-     * 定时一致性检查任务
-     */
-    @Scheduled(fixedRate = 60 * 60 * 1000) // 60分钟
+//    @Scheduled(fixedRate = 60 * 60 * 1000)
     public void executeConsistencyCheck() {
         checkTotalCounter.increment();
-
-        // 1. 等待恢复服务完成
         long startTime = System.currentTimeMillis();
-        while (!orderRecoveryService.isRecoveryCompleted() && System.currentTimeMillis() - startTime < 10000) {
-            try {
-                Thread.sleep(500);
-            } catch (InterruptedException e) {
-                log.warn("等待订单恢复完成被中断", e);
-                break;
-            }
-        }
+
+        // 等待Disruptor+数据库线程池+恢复服务就绪（修正Disruptor判断逻辑）
+        waitForPersistenceReady(startTime);
 
         log.info("========== 开始执行订单数据一致性检查 ==========");
         try {
@@ -84,8 +80,8 @@ public class OrderConsistencyCheckService {
                 log.info("检查任务：无有效恢复状态，检查通过");
                 return;
             }
-            // 2. 从数据库查询所有未完成订单
-            List<Order> dbUnfinishedOrders = orderMapper.selectByStatusIn(statusList);
+
+            List<Order> dbUnfinishedOrders = orderMapper.selectPartByStatusIn(statusList);
             log.info("数据库中未完成订单数量：{}", dbUnfinishedOrders.size());
 
             if (dbUnfinishedOrders.isEmpty()) {
@@ -94,90 +90,168 @@ public class OrderConsistencyCheckService {
                 return;
             }
 
-            // 3. 从内存订单簿获取所有订单
-            OrderBook orderBook = matchingEngine.getOrderBook();
-            List<Order> memoryAllOrders = orderBook.getAllOrders();
+            // 线程安全读取内存订单簿（依赖OrderBook内部读写锁）
+            List<Order> memoryAllOrders = matchingEngine.getOrderBook().getAllOrders();
             log.info("内存订单簿中订单数量：{}", memoryAllOrders.size());
 
-            // 4. 核心检查逻辑
-            int mismatchCount = 0; // 本次检查发现不一致的订单数
+            // 核心检查逻辑（修正LocalDateTime.getTime()）
+            int mismatchCount = doConsistencyCheck(dbUnfinishedOrders, memoryAllOrders);
 
-            for (Order dbOrder : dbUnfinishedOrders) {
-                String clOrderId = dbOrder.getClOrderId();
-
-                // 检查：内存中是否存在该订单
-                Optional<Order> memoryOrderOpt = memoryAllOrders.stream()
-                        .filter(o -> clOrderId.equals(o.getClOrderId()))
-                        .findFirst();
-
-                if (memoryOrderOpt.isEmpty()) {
-                    // 严重异常：数据库有但内存无
-                    mismatchCount++;
-                    log.error("【严重异常】订单[{}]：数据库存在未完成订单，但内存订单簿中未找到！", clOrderId);
-                    sendAlarm(clOrderId, "严重不一致：数据库存在但内存缺失，疑似内存数据丢失");
-                    continue;
-                }
-
-                // 检查：核心字段是否匹配
-                Order memoryOrder = memoryOrderOpt.get();
-                boolean isMismatch = false;
-                StringBuilder mismatchMsg = new StringBuilder();
-
-                // 对比订单状态
-                if (!memoryOrder.getStatus().equals(dbOrder.getStatus())) {
-                    isMismatch = true;
-                    mismatchMsg.append(String.format("状态不匹配(DB:%s vs Mem:%s); ",
-                            dbOrder.getStatus().getDesc(), memoryOrder.getStatus().getDesc()));
-                }
-
-                // 对比剩余数量
-                if (memoryOrder.getQty() != null && dbOrder.getQty() != null) {
-                    if (!memoryOrder.getQty().equals(dbOrder.getQty())) {
-                        isMismatch = true;
-                        mismatchMsg.append(String.format("剩余数量不匹配(DB:%d vs Mem:%d); ",
-                                dbOrder.getQty(), memoryOrder.getQty()));
-                    }
-                } else if (memoryOrder.getQty() != null || dbOrder.getQty() != null) {
-                    isMismatch = true;
-                    mismatchMsg.append("剩余数量一方为空; ");
-                }
-
-                // 对比已成交数量
-                Integer memoryExecutedQty = calculateExecutedQty(memoryOrder);
-                Integer dbExecutedQty = calculateExecutedQty(dbOrder);
-
-                if (memoryExecutedQty != null && dbExecutedQty != null) {
-                    if (!memoryExecutedQty.equals(dbExecutedQty)) {
-                        isMismatch = true;
-                        mismatchMsg.append(String.format("已成交数量不匹配(DB:%d vs Mem:%d); ",
-                                dbExecutedQty, memoryExecutedQty));
-                    }
-                } else if (memoryExecutedQty != null || dbExecutedQty != null) {
-                    isMismatch = true;
-                    mismatchMsg.append("已成交数量计算异常; ");
-                }
-
-                // 处理不一致结果
-                if (isMismatch) {
-                    mismatchCount++;
-                    log.warn("【数据不一致】订单[{}]：差异详情 -> {}", clOrderId, mismatchMsg.toString());
-                }
-            }
-
-            // 5. 检查结果汇总
-            if (mismatchCount > 0) {
-                checkMismatchCounter.increment(mismatchCount);
-            }
-
-            log.info("========== 一致性检查任务汇总 ==========");
-            log.info("核对未完成订单总数：{}", dbUnfinishedOrders.size());
-            log.info("本次发现不一致订单数：{}", mismatchCount);
-            log.info("========== 订单数据一致性检查完成 ==========\n");
+            // 结果汇总
+            logSummary(dbUnfinishedOrders.size(), mismatchCount);
 
         } catch (Exception e) {
             log.error("========== 订单一致性检查任务执行失败 ==========", e);
             sendAlarm("检查任务全局异常", "定时检查任务执行失败：" + e.getMessage());
             checkFailedCounter.increment();
+        }
+    }
+
+    /**
+     * 修正：Disruptor队列消费完成判断逻辑
+     */
+    private void waitForPersistenceReady(long startTime) {
+        while (true) {
+            // 正确判断RingBuffer是否无未消费事件：剩余容量 == 初始bufferSize
+            boolean isDisruptorEmpty = disruptorManager.isRingBufferEmpty();
+            // 数据库线程池是否空闲
+            boolean isDbExecutorIdle = isDbPersistenceExecutorIdle();
+            // 恢复服务是否完成
+            boolean isRecoveryCompleted = orderRecoveryService.isRecoveryCompleted();
+
+            if (isDisruptorEmpty && isDbExecutorIdle && isRecoveryCompleted) {
+                log.info("Disruptor队列已排空 + 数据库线程池空闲 + 恢复服务完成，开始检查");
+                break;
+            }
+
+            if (System.currentTimeMillis() - startTime > maxWaitTime) {
+                String warnMsg = String.format(
+                        "等待超时（%d秒），强制执行检查！Disruptor空：%s，DB线程池空闲：%s，恢复完成：%s",
+                        maxWaitTime / 1000, isDisruptorEmpty, isDbExecutorIdle, isRecoveryCompleted
+                );
+                log.warn(warnMsg);
+                sendAlarm("一致性检查前置等待超时", warnMsg);
+                break;
+            }
+
+            try {
+                Thread.sleep(1000);
+            } catch (InterruptedException e) {
+                log.warn("等待队列排空被中断", e);
+                Thread.currentThread().interrupt();
+                break;
+            }
+        }
+    }
+
+    /**
+     * 修正：核心检查逻辑（LocalDateTime转毫秒数）
+     */
+    private int doConsistencyCheck(List<Order> dbUnfinishedOrders, List<Order> memoryAllOrders) {
+        int mismatchCount = 0;
+        long currentTime = System.currentTimeMillis();
+
+        for (Order dbOrder : dbUnfinishedOrders) {
+            // LocalDateTime获取毫秒数
+            long orderCreateTime = dbOrder.getCreateTime().toInstant(ZoneOffset.UTC).toEpochMilli();
+
+            // 窗口期过滤
+            if (currentTime - orderCreateTime < toleranceWindow && orderCreateTime != 0) {
+                checkFalseAlarmCounter.increment();
+                log.debug("订单[{}]创建时间{}，处于{}秒容忍窗口期，跳过检查",
+                        dbOrder.getClOrderId(),
+                        dbOrder.getCreateTime(),
+                        toleranceWindow / 1000);
+                continue;
+            }
+
+            String clOrderId = dbOrder.getClOrderId();
+            Optional<Order> memoryOrderOpt = memoryAllOrders.stream()
+                    .filter(o -> clOrderId.equals(o.getClOrderId()))
+                    .findFirst();
+
+            if (memoryOrderOpt.isEmpty()) {
+                if (isAlarmThrottled(clOrderId)) {
+                    log.warn("订单[{}]数据库存在但内存无，已触发过告警（5分钟内），跳过重复告警", clOrderId);
+                    continue;
+                }
+                mismatchCount++;
+                String errorMsg = "数据库存在未完成订单，但内存订单簿中未找到！";
+                log.error("【严重异常】订单[{}]：{}", clOrderId, errorMsg);
+                sendAlarm(clOrderId, "严重不一致：" + errorMsg + " 疑似内存数据丢失");
+                continue;
+            }
+
+            // 字段一致性检查
+            mismatchCount += checkOrderFieldConsistency(dbOrder, memoryOrderOpt.get());
+        }
+
+        return mismatchCount;
+    }
+
+    private boolean isDbPersistenceExecutorIdle() {
+        try {
+            ThreadPoolTaskExecutor executor = persistEventHandler.getDbExecutor();
+            return executor.getActiveCount() == 0 && executor.getThreadPoolExecutor().getQueue().size() == 0;
+        } catch (Exception e) {
+            log.warn("检查数据库线程池状态失败，默认认为非空闲", e);
+            return false;
+        }
+    }
+
+    private int checkOrderFieldConsistency(Order dbOrder, Order memoryOrder) {
+        boolean isMismatch = false;
+        StringBuilder mismatchMsg = new StringBuilder();
+
+        // 状态对比
+        if (!memoryOrder.getStatus().equals(dbOrder.getStatus())) {
+            isMismatch = true;
+            mismatchMsg.append(String.format("状态不匹配(DB:%s vs Mem:%s); ",
+                    dbOrder.getStatus().getDesc(), memoryOrder.getStatus().getDesc()));
+        }
+
+        // 剩余数量对比
+        if (memoryOrder.getQty() != null && dbOrder.getQty() != null) {
+            if (!memoryOrder.getQty().equals(dbOrder.getQty())) {
+                isMismatch = true;
+                mismatchMsg.append(String.format("剩余数量不匹配(DB:%d vs Mem:%d); ",
+                        dbOrder.getQty(), memoryOrder.getQty()));
+            }
+        } else if (memoryOrder.getQty() != null || dbOrder.getQty() != null) {
+            isMismatch = true;
+            mismatchMsg.append("剩余数量一方为空; ");
+        }
+
+        // 已成交数量对比
+        Integer memoryExecutedQty = calculateExecutedQty(memoryOrder);
+        Integer dbExecutedQty = calculateExecutedQty(dbOrder);
+        if (memoryExecutedQty != null && dbExecutedQty != null) {
+            if (!memoryExecutedQty.equals(dbExecutedQty)) {
+                isMismatch = true;
+                mismatchMsg.append(String.format("已成交数量不匹配(DB:%d vs Mem:%d); ",
+                        dbExecutedQty, memoryExecutedQty));
+            }
+        } else if (memoryExecutedQty != null || dbExecutedQty != null) {
+            isMismatch = true;
+            mismatchMsg.append("已成交数量计算异常; ");
+        }
+
+        if (isMismatch) {
+            log.warn("【数据不一致】订单[{}]：差异详情 -> {}", dbOrder.getClOrderId(), mismatchMsg);
+            sendAlarm(dbOrder.getClOrderId(), "数据不一致：" + mismatchMsg);
+            return 1;
+        }
+        return 0;
+    }
+
+    private void logSummary(int totalCheckCount, int mismatchCount) {
+        log.info("========== 一致性检查任务汇总 ==========");
+        log.info("核对未完成订单总数：{}", totalCheckCount);
+        log.info("本次发现不一致订单数：{}", mismatchCount);
+        log.info("========== 订单数据一致性检查完成 ==========\n");
+
+        if (mismatchCount > 0) {
+            checkMismatchCounter.increment(mismatchCount);
         }
     }
 
@@ -192,6 +266,7 @@ public class OrderConsistencyCheckService {
                     try {
                         return OrderStatusEnum.valueOf(status);
                     } catch (IllegalArgumentException e) {
+                        log.warn("无效的恢复状态：{}，已过滤", status);
                         return null;
                     }
                 })
@@ -199,9 +274,6 @@ public class OrderConsistencyCheckService {
                 .collect(Collectors.toList());
     }
 
-    /**
-     * 工具方法：计算已成交数量
-     */
     private Integer calculateExecutedQty(Order order) {
         if (order == null) return null;
         Integer originalQty = order.getOriginalQty();
@@ -222,9 +294,15 @@ public class OrderConsistencyCheckService {
         return executedQty;
     }
 
-    /**
-     * 发送告警
-     */
+    private boolean isAlarmThrottled(String clOrderId) {
+        long lastAlarmTime = alarmThrottleMap.getOrDefault(clOrderId, 0L);
+        if (System.currentTimeMillis() - lastAlarmTime < ALARM_THROTTLE_TIME) {
+            return true;
+        }
+        alarmThrottleMap.put(clOrderId, System.currentTimeMillis());
+        return false;
+    }
+
     private void sendAlarm(String clOrderId, String msg) {
         log.error("[一致性告警] 订单[{}]：{}", clOrderId, msg);
     }

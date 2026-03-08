@@ -1,7 +1,10 @@
 package com.example.trading.config;
 
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.stereotype.Component;
 
+import java.util.Arrays;
+import java.util.List;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -13,26 +16,18 @@ public class ShardingMatchingExecutor {
 
     private final Executor[] executors;
     private final int shardCount;
-
-    // 用于生成线程名
     private final AtomicInteger threadCounter = new AtomicInteger(0);
 
-    /**
-     * 构造函数
-     * @param shardCount 分片数量，建议等于 CPU 核心数 或 2*CPU
-     */
     public ShardingMatchingExecutor(int shardCount) {
         this.shardCount = shardCount;
         this.executors = new Executor[shardCount];
-
-        // 初始化每一个分片都是一个“单线程执行器”
         for (int i = 0; i < shardCount; i++) {
             final int index = i;
             this.executors[i] = new ThreadPoolExecutor(
                     1, // 核心线程 1
                     1, // 最大线程 1，保证该分片绝对串行
                     60L, TimeUnit.SECONDS,
-                    new LinkedBlockingQueue<>(1000), // 每个分片自己的等待队列
+                    new LinkedBlockingQueue<>(3000),
                     r -> new Thread(r, "matching-shard-" + index + "-" + threadCounter.incrementAndGet()),
                     // 拒绝策略：由调用线程处理（或者根据业务需求抛异常/入队）
                     new ThreadPoolExecutor.CallerRunsPolicy()
@@ -41,9 +36,12 @@ public class ShardingMatchingExecutor {
         log.info("撮合引擎分片初始化完成，共 {} 个分片", shardCount);
     }
 
-    /**
-     * 根据股票ID获取对应的执行器
-     */
+    // 新增：暴露所有分片线程池（用于状态监控）
+    public List<Executor> getAllShardExecutors() {
+        return Arrays.asList(executors);
+    }
+
+    // 原有方法保持不变
     public Executor getExecutor(String securityId) {
         // 利用 hashCode 取模，保证同一个 securityId 永远走到同一个 executor
         int index = Math.abs(securityId.hashCode()) % shardCount;

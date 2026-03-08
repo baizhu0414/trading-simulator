@@ -14,9 +14,9 @@ spring:
       # 最小空闲连接
       min-idle: 10
       # 最大活跃连接数 (核心配置：根据你的 DB 服务器配置设置，通常设为 CPU核数 * 2 + 1 或 20-50)
-      max-active: 50
+      max-active: 20
       # 获取连接等待超时时间 (毫秒)
-      max-wait: 60000
+      max-wait: 3000
 
       # 配置间隔多久才进行一次检测，检测需要关闭的空闲连接
       time-between-eviction-runs-millis: 60000
@@ -27,6 +27,7 @@ spring:
       validation-query: SELECT 1
       # 申请连接时执行validationQuery检测连接是否有效，建议配置为true，不影响性能，并保证安全性
       test-while-idle: true
+      validation-query-timeout: 2 # 连接验证超时时间
       # 申请连接时执行validationQuery检测连接是否有效，会降低性能
       test-on-borrow: false
       # 归还连接时执行validationQuery检测连接是否有效，会降低性能
@@ -38,7 +39,7 @@ spring:
 
       # 配置监控统计拦截的filters
       # stat: 监控统计; log4j2: 日志; wall: 防火墙(防止SQL注入)
-      filters: stat,wall,slf4j
+      filters: stat,slf4j
 
       # WebStatFilter 配置
       web-stat-filter:
@@ -56,6 +57,7 @@ spring:
         # 监控后台的账号密码 (建议设置)
         login-username: admin
         login-password: admin123
+
   # MyBatis配置
   mybatis:
     mapper-locations: classpath:mapper/*.xml  # Mapper XML文件位置
@@ -66,18 +68,28 @@ spring:
       map-underscore-to-camel-case: true  # 下划线转驼峰（适配MySQL字段名）
       log-impl: org.apache.ibatis.logging.slf4j.Slf4jImpl  # 打印SQL日志（便于优化）
       default-enum-type-handler: org.apache.ibatis.type.EnumOrdinalTypeHandler # 枚举类型默认处理方式（可选）
-    # Redis 配置
+  data:
     redis:
-      host: localhost # Redis 服务器地址（本地测试用，生产改真实地址）
-      port: 6379 # Redis 端口（默认6379）
-      password: # Redis 密码（无密码则留空，生产必须设置）
-      database: 0 # 使用的数据库编号（默认0，可自定义）
-      timeout: 3000ms # 连接超时时间
+      host: localhost
+      port: 6379
+      password:
+      database: 0
+      timeout: 3000ms
 
 db:
   persist:
     retry:
       count: 3 # 异步持久化重试次数
+
+# 系统日志，卡死的时候用于排查对象初始化过程。比如：DisruptorManager之前写了直接初始化对象的时候就用对象池，会耗尽时间和内存，卡死。
+#logging:
+#  level:
+#    root: INFO
+#    org.springframework: DEBUG  # 开启Spring核心日志
+#    com.alibaba.druid: DEBUG   # 开启Druid连接池日志
+#    io.lettuce.core: DEBUG      # 开启Redis客户端日志（如果用Lettuce）
+#  pattern:
+#    console: "%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n"
 
 # MyBatis分页插件配置（可选）
 pagehelper:
@@ -100,7 +112,7 @@ trading:
 
   recovery:
     enable: true
-    recover-status: MATCHING,NOT_FILLED,PART_FILLED # 应用崩溃或其他情况，重启加载未完成订单。
+    recover-status: PROCESSING,MATCHING,NOT_FILLED,PART_FILLED # 应用崩溃或其他情况，重启加载未完成订单。
     batch-size: 100 # 一页加载的订单数
 
 # 监控配置

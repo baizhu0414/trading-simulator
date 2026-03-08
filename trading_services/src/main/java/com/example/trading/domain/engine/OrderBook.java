@@ -15,6 +15,7 @@ import java.math.RoundingMode;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.PriorityBlockingQueue;
+import java.util.concurrent.locks.ReentrantReadWriteLock;
 import java.util.stream.Collectors;
 
 /**
@@ -48,6 +49,10 @@ public class OrderBook {
     // 根据股票ID分片处理，不会再出现多个线程访问同一股票的冲突情况了！！！
 //    private final ConcurrentMap<String, ConcurrentMap<SideEnum, ConcurrentSkipListMap<BigDecimal, PriorityBlockingQueue<Order>>>> orderBookMap =
 //            new ConcurrentHashMap<>();
+
+    // 读写锁：读锁共享，写锁排他
+    private final ReentrantReadWriteLock rwLock = new ReentrantReadWriteLock();
+    private final ReentrantReadWriteLock.ReadLock readLock = rwLock.readLock();
 
     private final MeterRegistry meterRegistry;
 
@@ -311,33 +316,39 @@ public class OrderBook {
      * 获取订单簿中所有订单
      */
     public List<Order> getAllOrders() {
-        List<Order> allOrders = new ArrayList<>();
+        readLock.lock();
+        try {
+            List<Order> allOrders = new ArrayList<>();
 
-        // 遍历所有股票的订单簿（如果此处修改，别处也修改就会出错。）
-        for (Map.Entry<String, Map<SideEnum, TreeMap<BigDecimal, Deque<Order>>>> securityEntry : orderBookMap.entrySet()) {
-            String securityId = securityEntry.getKey();
-            Map<SideEnum, TreeMap<BigDecimal, Deque<Order>>> sideMap = securityEntry.getValue();
+            // 遍历所有股票的订单簿（如果此处修改，别处也修改就会出错。）
+            for (Map.Entry<String, Map<SideEnum, TreeMap<BigDecimal, Deque<Order>>>> securityEntry : orderBookMap.entrySet()) {
+                String securityId = securityEntry.getKey();
+                Map<SideEnum, TreeMap<BigDecimal, Deque<Order>>> sideMap = securityEntry.getValue();
 
-            // 遍历买卖方向
-            for (Map.Entry<SideEnum, TreeMap<BigDecimal, Deque<Order>>> sideEntry : sideMap.entrySet()) {
-                SideEnum side = sideEntry.getKey();
-                TreeMap<BigDecimal, Deque<Order>> priceMap = sideEntry.getValue();
+                // 遍历买卖方向
+                for (Map.Entry<SideEnum, TreeMap<BigDecimal, Deque<Order>>> sideEntry : sideMap.entrySet()) {
+                    SideEnum side = sideEntry.getKey();
+                    TreeMap<BigDecimal, Deque<Order>> priceMap = sideEntry.getValue();
 
-                // 遍历价格层级
-                for (Map.Entry<BigDecimal, Deque<Order>> priceEntry : priceMap.entrySet()) {
-                    BigDecimal price = priceEntry.getKey();
-                    Deque<Order> orderQueue = priceEntry.getValue();
+                    // 遍历价格层级
+                    for (Map.Entry<BigDecimal, Deque<Order>> priceEntry : priceMap.entrySet()) {
+                        BigDecimal price = priceEntry.getKey();
+                        Deque<Order> orderQueue = priceEntry.getValue();
 
-                    // 遍历价格下的所有订单
-                    List<Order> queueOrders = orderQueue.stream().collect(Collectors.toList());
-                    allOrders.addAll(queueOrders);
+                        // 遍历价格下的所有订单
+                        List<Order> queueOrders = orderQueue.stream().collect(Collectors.toList());
+                        allOrders.addAll(queueOrders);
 
-                    log.debug("股票[{}]方向[{}]价格[{}]下有{}笔订单", securityId, side.getDesc(), price, queueOrders.size());
+                        log.debug("股票[{}]方向[{}]价格[{}]下有{}笔订单", securityId, side.getDesc(), price, queueOrders.size());
+                    }
                 }
             }
-        }
 
-        log.info("订单簿中总计查询到{}笔订单（对账用）", allOrders.size());
-        return Collections.unmodifiableList(allOrders);
+            log.info("订单簿中总计查询到{}笔订单（对账用）", allOrders.size());
+            return Collections.unmodifiableList(allOrders);
+        } finally {
+            readLock.unlock(); // 必须释放锁
+        }
     }
+
 }

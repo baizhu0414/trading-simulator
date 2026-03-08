@@ -13,15 +13,23 @@
         </encoder>
     </appender>
 
-    <!-- 文件输出（按天滚动） -->
+    <!-- 文件输出（按小时滚动）- 仅记录WARN及以上级别 -->
     <appender name="FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
         <file>${LOG_PATH}/trading.log</file>
         <rollingPolicy class="ch.qos.logback.core.rolling.TimeBasedRollingPolicy">
-            <!-- 日志归档路径及命名格式 -->
-            <fileNamePattern>${LOG_PATH}/trading-%d{yyyy-MM-dd}.log</fileNamePattern>
-            <!-- 日志保留天数 -->
-            <maxHistory>30</maxHistory>
+            <!-- 核心修改：文件名增加小时维度（HH），实现每小时滚动 -->
+            <fileNamePattern>${LOG_PATH}/trading-%d{yyyy-MM-dd-HH}.log</fileNamePattern>
+            <!-- 日志保留天数（按小时生成的话，30天≈720个文件，可根据需要调整） -->
+            <maxHistory>720</maxHistory>
+            <!-- 可选：设置总日志文件大小上限（防止磁盘占满） -->
+            <totalSizeCap>10GB</totalSizeCap>
+            <!-- 可选：开启文件压缩（归档的日志文件会变成.gz格式） -->
+            <cleanHistoryOnStart>true</cleanHistoryOnStart>
         </rollingPolicy>
+        <!-- 仅记录WARN及以上级别到文件 -->
+        <filter class="ch.qos.logback.classic.filter.ThresholdFilter">
+            <level>WARN</level>
+        </filter>
         <encoder>
             <pattern>${LOG_PATTERN}</pattern>
             <charset>UTF-8</charset>
@@ -35,7 +43,7 @@
     </root>
 
     <!-- 自定义包日志级别（可选） -->
-    <logger name="com.example.trading" level="DEBUG" additivity="false">
+    <logger name="com.example.trading" level="INFO" additivity="false">
         <appender-ref ref="CONSOLE"/>
         <appender-ref ref="FILE"/>
     </logger>

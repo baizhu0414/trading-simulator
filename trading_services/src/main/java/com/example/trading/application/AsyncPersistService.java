@@ -28,7 +28,6 @@ public class AsyncPersistService {
     private final DisruptorManager disruptorManager;
     private final PersistSignalFactory persistSignalFactory;
 
-    // 原有的生产信号方法保留（不变）
     public void persistOrderAndTrades(Order matchedOrder, List<Order> counterOrders, List<Trade> trades, String processingKey) {
         PersistSignal signal = persistSignalFactory.createOrderAndTradesSignal(
                 matchedOrder, counterOrders, trades, processingKey

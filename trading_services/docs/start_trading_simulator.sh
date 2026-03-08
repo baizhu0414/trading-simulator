@@ -30,7 +30,7 @@ fi
 
 # 启动Spring Boot应用（后台运行，日志重定向）
 cd "${SPRING_BOOT_DIR}" || exit 1
-nohup java -jar "${SPRING_BOOT_JAR}" > "${LOG_BASE_DIR}/spring_boot.log" 2>&1 &
+nohup java -Xmx8G -Xms8G -XX:G1NewSizePercent=30 -XX:SurvivorRatio=6 -XX:MaxDirectMemorySize=2G -jar "${SPRING_BOOT_JAR}" > "${LOG_BASE_DIR}/spring_boot.log" 2>&1 &
 echo -n "应用启动中，等待2秒..."
 sleep 2
 

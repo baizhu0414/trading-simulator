@@ -30,7 +30,8 @@ public enum ErrorCodeEnum {
     ORDER_NOT_CANCELABLE(5004, "订单状态不可撤销"),
     ORDER_NOT_IN_ORDER_BOOK(5005, "订单不在订单簿中，无法撤销"),
     CANCEL_PROCESS_FAILED(5006, "订单撤销处理失败"),
-    SYSTEM_BUSY(9999, "系统繁忙，请重试");
+    SYSTEM_BUSY(9999, "系统繁忙，请重试"),
+    SYSTEM_ERROR(10000, "系统错误");
 
     private final Integer code;
     private final String desc;
