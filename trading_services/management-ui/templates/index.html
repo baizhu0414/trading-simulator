@@ -1,0 +1,1593 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Core Trading Engine - Industrial Terminal</title>
+    <!-- 引入等宽和无衬线字体，增加专业感 -->
+    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+    <!-- FontAwesome图标 -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
+    <style>
+        :root {
+            /* 极客暗黑系工业主题 (Pro Terminal) */
+            --bg-body: #0b0e14;        /* 主体深沉背景 */
+            --bg-panel: #151b23;       /* 面板基础色 */
+            --bg-input: #010409;       /* 输入框极暗色 */
+            
+            --border-primary: #30363d;
+            --border-active: #4a90e2;  /* 焦点激活时的科技蓝 */
+            
+            --text-main: #c9d1d9;      /* 主要文字色（护眼灰白） */
+            --text-muted: #8b949e;     /* 次级信息（偏暗） */
+            --text-high: #ffffff;      /* 强高亮（纯白） */
+            
+            --brand-main: #2f81f7;
+            
+            /* A股红涨绿跌经典配色 */
+            --bull-red: #f85149;
+            --bull-red-bg: rgba(248, 81, 73, 0.15);
+            --bear-green: #2ea043;
+            --bear-green-bg: rgba(46, 160, 67, 0.15);
+            
+            --color-warn: #d29922;
+            --color-info: #58a6ff;
+
+            --font-ui: 'Roboto', -apple-system, sans-serif;
+            --font-mono: 'JetBrains Mono', Consolas, monospace;
+            
+            --transition: all 0.2s cubic-bezier(0.25, 0.8, 0.25, 1);
+        }
+
+        /* 隐藏滚动条但保留功能，使得界面更像 Native App */
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: #30363d; border-radius: 3px; }
+        ::-webkit-scrollbar-thumb:hover { background: #58a6ff; }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: var(--font-ui);
+            background-color: var(--bg-body);
+            color: var(--text-main);
+            font-size: 13px;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden; 
+        }
+
+        /* ================= 顶栏设计 ================= */
+        .top-bar {
+            background-color: var(--bg-panel);
+            border-bottom: 1px solid var(--border-primary);
+            height: 50px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 0 24px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.5);
+            z-index: 100;
+        }
+
+        .sys-logo {
+            font-weight: 700;
+            color: var(--text-high);
+            font-size: 15px;
+            letter-spacing: 1px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .sys-logo i { color: var(--brand-main); }
+
+        .conn-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            font-family: var(--font-mono);
+            font-size: 12px;
+            color: var(--bear-green);
+            background: var(--bear-green-bg);
+            padding: 5px 12px;
+            border-radius: 4px;
+            border: 1px solid var(--bear-green);
+            box-shadow: 0 0 10px rgba(46, 160, 67, 0.2);
+        }
+
+        .pulsing-dot {
+            width: 8px; height: 8px;
+            border-radius: 50%;
+            background-color: var(--bear-green);
+            box-shadow: 0 0 8px var(--bear-green);
+            animation: pulse-glow 2s infinite;
+        }
+
+        @keyframes pulse-glow {
+            0%, 100% { opacity: 1; transform: scale(1); }
+            50% { opacity: 0.4; transform: scale(0.8); }
+        }
+
+        /* ================= 主布局 ================= */
+        .layout-container {
+            display: flex;
+            flex: 1;
+            padding: 16px;
+            gap: 16px;
+            overflow: hidden;
+        }
+
+        /* 统一面板风格 (类似玻璃反光) */
+        .panel {
+            background-color: var(--bg-panel);
+            border: 1px solid var(--border-primary);
+            border-radius: 6px;
+            display: flex;
+            flex-direction: column;
+            position: relative;
+        }
+        
+        .panel-header {
+            padding: 10px 16px;
+            font-size: 12px;
+            font-weight: 700;
+            color: var(--text-high);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            border-bottom: 1px solid var(--border-primary);
+            background: linear-gradient(180deg, rgba(255,255,255,0.03) 0%, rgba(255,255,255,0) 100%);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        /* ================= 左侧：控制台 (发单) ================= */
+        .left-console {
+            width: 380px;
+            flex-shrink: 0;
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+        }
+
+        .form-area {
+            padding: 16px;
+            display: flex;
+            flex-direction: column;
+            gap: 14px;
+            flex: 1;
+            overflow-y: auto;
+        }
+
+        .form-row {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 12px;
+        }
+
+        .input-group label {
+            display: block;
+            font-size: 12px;
+            color: var(--text-muted);
+            margin-bottom: 6px;
+            font-weight: 500;
+        }
+
+        /* 工业级发光输入框组合 */
+        .input-box {
+            display: flex;
+            align-items: center;
+            background: var(--bg-input);
+            border: 1px solid var(--border-primary);
+            border-radius: 4px;
+            transition: var(--transition);
+        }
+
+        .input-box:focus-within {
+            border-color: var(--brand-main);
+            box-shadow: 0 0 0 1px var(--brand-main);
+        }
+
+        .input-box input, .input-box select {
+            width: 100%;
+            background: transparent;
+            border: none;
+            color: var(--text-high);
+            font-family: var(--font-mono);
+            font-size: 13px;
+            padding: 8px 10px;
+            outline: none;
+        }
+
+        /* 订单生成专属框 */
+        .id-generator-box {
+            background-color: rgba(1, 4, 9, 0.8);
+            border-color: #1f6feb;
+            padding-right: 4px;
+        }
+
+        .id-generator-box input {
+            color: #58a6ff;
+            font-weight: bold;
+            font-size: 14px;
+            text-shadow: 0 0 8px rgba(88,166,255,0.4);
+        }
+
+        .btn-gen {
+            background: #1f6feb;
+            color: #fff;
+            border: none;
+            border-radius: 3px;
+            padding: 4px 8px;
+            font-size: 11px;
+            cursor: pointer;
+            font-weight: bold;
+            transition: var(--transition);
+        }
+        .btn-gen:hover { background: #388bfd; }
+        .btn-gen:active { transform: scale(0.95); }
+
+        /* 买卖方向拨动开关 */
+        .side-toggle {
+            display: flex;
+            background: var(--bg-input);
+            border: 1px solid var(--border-primary);
+            border-radius: 4px;
+            padding: 2px;
+        }
+
+        .side-btn {
+            flex: 1;
+            text-align: center;
+            padding: 8px 0;
+            font-weight: 700;
+            font-size: 12px;
+            cursor: pointer;
+            border-radius: 3px;
+            color: var(--text-muted);
+            transition: var(--transition);
+        }
+
+        .side-btn.active[data-side="BUY"] {
+            background: var(--bull-red);
+            color: #fff;
+            box-shadow: 0 2px 8px rgba(248,81,73,0.4);
+        }
+
+        .side-btn.active[data-side="SELL"] {
+            background: var(--bear-green);
+            color: #fff;
+            box-shadow: 0 2px 8px rgba(46,160,67,0.4);
+        }
+
+        /* 提交大按钮 */
+        .btn-submit {
+            margin-top: 8px;
+            width: 100%;
+            padding: 14px;
+            font-size: 14px;
+            font-weight: 700;
+            letter-spacing: 1px;
+            color: #fff;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            background: var(--bull-red);
+            text-shadow: 0 1px 2px rgba(0,0,0,0.5);
+            box-shadow: inset 0 1px 0 rgba(255,255,255,0.2), 0 4px 0 rgba(0,0,0,0.4);
+            transition: var(--transition);
+        }
+
+        .btn-submit:hover { filter: brightness(1.15); }
+        .btn-submit:active {
+            transform: translateY(3px);
+            box-shadow: inset 0 1px 0 rgba(255,255,255,0.1), 0 1px 0 rgba(0,0,0,0.4);
+        }
+
+        .btn-submit.action-sell { background: var(--bear-green); }
+
+        /* ================= 左底部：实时终端日志 ================= */
+        .terminal-log {
+            height: 220px;
+            background: #010409;
+            border-top: 1px solid var(--border-primary);
+            font-family: var(--font-mono);
+            font-size: 11px;
+            padding: 12px;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+
+        .log-row {
+            line-height: 1.4;
+            word-wrap: break-word;
+        }
+        .log-time { color: #6e7681; margin-right: 8px; }
+        .log-tx { color: #58a6ff; }
+        .log-rx-ok { color: var(--bear-green); }
+        .log-rx-err { color: var(--bull-red); }
+
+        /* ================= 右侧：数据大屏 ================= */
+        .right-dashboard {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+            overflow: hidden; /* 防止撑爆 */
+        }
+
+        /* 四格统计仪表盘 */
+        .kpi-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 16px;
+            flex-shrink: 0;
+        }
+
+        .kpi-card {
+            background: var(--bg-panel);
+            border: 1px solid var(--border-primary);
+            border-radius: 6px;
+            padding: 16px;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            position: relative;
+            overflow: hidden;
+            transition: var(--transition);
+        }
+
+        .kpi-card.clickable {
+            cursor: pointer;
+        }
+
+        .kpi-card.clickable:hover {
+            border-color: #3a4452;
+            transform: translateY(-1px);
+        }
+
+        .kpi-card.active-filter {
+            border-color: #58a6ff;
+            box-shadow: 0 0 0 1px rgba(88,166,255,0.35) inset;
+        }
+        
+        /* 指标点缀条 */
+        .kpi-card::before {
+            content: '';
+            position: absolute;
+            left: 0; top: 0; bottom: 0; width: 3px;
+        }
+
+        .kpi-card:nth-child(1)::before { background: var(--text-muted); }
+        .kpi-card:nth-child(2)::before { background: var(--brand-main); }
+        .kpi-card:nth-child(3)::before { background: var(--bear-green); }
+        .kpi-card:nth-child(4)::before { background: var(--bull-red); }
+
+        .kpi-title {
+            font-size: 11px;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            font-weight: 600;
+            margin-bottom: 8px;
+        }
+
+        .kpi-val {
+            font-family: var(--font-mono);
+            font-size: 28px;
+            font-weight: 700;
+            color: var(--text-high);
+            line-height: 1;
+        }
+
+        .val-matching { color: var(--brand-main); text-shadow: 0 0 10px rgba(47,129,247,0.4); }
+        .val-filled { color: var(--bear-green); text-shadow: 0 0 10px rgba(46,160,67,0.4); }
+        .val-reject { color: var(--bull-red); text-shadow: 0 0 10px rgba(248,81,73,0.4); }
+
+        /* ================= 订单墙表格 ================= */
+        .blotter-area {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            border: 1px solid var(--border-primary);
+            border-radius: 6px;
+            background: #0d1117;
+            overflow: hidden;
+        }
+
+        .table-wrap {
+            overflow: auto;
+            flex: 1;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            text-align: left;
+        }
+
+        thead {
+            position: sticky;
+            top: 0;
+            background: #161b22;
+            z-index: 10;
+        }
+
+        /* 给表头底部加上亮线分割 */
+        thead::after {
+            content: '';
+            position: absolute;
+            left: 0; right: 0; bottom: 0;
+            border-bottom: 2px solid #21262d;
+        }
+
+        th {
+            font-size: 11px;
+            color: var(--text-muted);
+            padding: 12px 16px;
+            font-weight: 600;
+            white-space: nowrap;
+        }
+
+        td {
+            padding: 10px 16px;
+            border-bottom: 1px solid var(--border-primary);
+            font-family: var(--font-mono);
+            font-size: 13px;
+            white-space: nowrap;
+        }
+
+        tbody tr:hover { background: rgba(88, 166, 255, 0.05); }
+
+        /* 元素特定渲染 */
+        .cl-id-cell { color: #58a6ff; font-weight: 700; }
+        .symbol-cell { font-weight: 700; color: #d2a8ff; }
+        .sym-market { font-size: 10px; color: #6e7681; border: 1px solid #30363d; border-radius: 2px; padding: 1px 4px; margin-left: 4px; }
+        
+        .px-cell { color: #f2cc60; }
+        
+        .buy-text { color: var(--bull-red); font-weight: 700;}
+        .sell-text { color: var(--bear-green); font-weight: 700;}
+
+        /* 状态微章 */
+        .status-badge {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            padding: 3px 8px;
+            border-radius: 2px;
+            font-size: 10px;
+            font-weight: bold;
+            letter-spacing: 0.5px;
+            border: 1px solid transparent;
+            font-family: var(--font-ui);
+        }
+        .s-matching { background: rgba(88,166,255,0.1); color: var(--color-info); border-color: rgba(88,166,255,0.3); }
+        .s-filled { background: var(--bear-green-bg); color: var(--bear-green); border-color: rgba(46,160,67,0.3); }
+        .s-reject { background: var(--bull-red-bg); color: var(--bull-red); border-color: rgba(248,81,73,0.3); }
+        .s-new { background: rgba(210,153,34,0.1); color: var(--color-warn); border-color: rgba(210,153,34,0.3); }
+
+        .reject-reason {
+            display: block;
+            font-size: 10px;
+            color: #6e7681;
+            margin-top: 4px;
+            max-width: 250px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .export-toolbar {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 10px 12px;
+            border-top: 1px solid #21262d;
+            border-bottom: 1px solid #21262d;
+            background: #101721;
+            flex-wrap: wrap;
+        }
+
+        .export-toolbar .label {
+            color: #8b949e;
+            font-size: 11px;
+            white-space: nowrap;
+        }
+
+        .export-toolbar .tiny-input {
+            background: #0d1117;
+            border: 1px solid #30363d;
+            color: #c9d1d9;
+            font-size: 11px;
+            padding: 5px 8px;
+            min-width: 140px;
+        }
+
+        .export-toolbar .tiny-input.wide {
+            min-width: 280px;
+            flex: 1;
+        }
+
+        .quick-range-group {
+            display: inline-flex;
+            gap: 6px;
+            align-items: center;
+        }
+
+        .quick-range-btn {
+            background: #21262d;
+            border: 1px solid #30363d;
+            color: #c9d1d9;
+            font-size: 10px;
+            padding: 4px 8px;
+            border-radius: 3px;
+            cursor: pointer;
+        }
+
+        .quick-range-btn:hover {
+            border-color: #58a6ff;
+            color: #ffffff;
+        }
+
+        .field-dropdown {
+            position: relative;
+            min-width: 280px;
+            flex: 1;
+        }
+
+        .field-dropdown-btn {
+            width: 100%;
+            text-align: left;
+            background: #0d1117;
+            border: 1px solid #30363d;
+            color: #c9d1d9;
+            font-size: 11px;
+            padding: 5px 8px;
+            cursor: pointer;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .field-dropdown-panel {
+            position: absolute;
+            top: calc(100% + 4px);
+            left: 0;
+            right: 0;
+            background: #0d1117;
+            border: 1px solid #30363d;
+            border-radius: 4px;
+            padding: 8px;
+            max-height: 240px;
+            overflow-y: auto;
+            z-index: 50;
+            display: none;
+        }
+
+        .field-dropdown-panel.open {
+            display: block;
+        }
+
+        .field-dropdown-actions {
+            display: flex;
+            gap: 6px;
+            margin-bottom: 8px;
+        }
+
+        .field-dropdown-actions button {
+            background: #21262d;
+            border: 1px solid #30363d;
+            color: #c9d1d9;
+            font-size: 10px;
+            padding: 3px 8px;
+            border-radius: 3px;
+            cursor: pointer;
+        }
+
+        .field-option {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 11px;
+            color: #c9d1d9;
+            padding: 2px 0;
+        }
+
+        .export-status {
+            color: #8b949e;
+            font-size: 11px;
+            min-height: 14px;
+            flex-basis: 100%;
+            word-break: break-all;
+        }
+
+        .export-status a {
+            color: #58a6ff;
+            text-decoration: underline;
+        }
+        
+    </style>
+</head>
+<body>
+
+    <!-- 顶部状态栏 -->
+    <header class="top-bar">
+        <div class="sys-logo">
+            <i class="fas fa-cubes"></i>
+            QUANT_LNK // CORE TRADING ENGINE
+        </div>
+        <div class="conn-badge">
+            <div class="pulsing-dot"></div>
+            GATEWAY 8081 [ONLINE]
+        </div>
+    </header>
+
+    <!-- 工作台区域 -->
+    <div class="layout-container">
+        
+        <!-- 左侧输入台 -->
+        <aside class="left-console panel">
+            <div class="panel-header">
+                ORDER ENTRY TERMINAL
+                <i class="fas fa-terminal" style="color:var(--text-muted)"></i>
+            </div>
+            
+            <form id="orderForm" class="form-area" onsubmit="return handleOrderSubmit(event)">
+                <!-- 核心：单号生成 -->
+                <div class="input-group">
+                    <label>Client Order ID (全局唯一)</label>
+                    <div class="input-box id-generator-box">
+                        <input type="text" id="clOrderId" readonly required>
+                        <button type="button" class="btn-gen" onclick="rollId()">
+                            <i class="fas fa-dice"></i> ROLL
+                        </button>
+                    </div>
+                </div>
+
+                <!-- 核心：买卖方向 -->
+                <div class="input-group" style="margin-top: 4px;">
+                    <label>Action (执行方向)</label>
+                    <input type="hidden" id="side" value="BUY">
+                    <div class="side-toggle">
+                        <div class="side-btn active" data-side="BUY" onclick="setSide('BUY')">BUY / 买入</div>
+                        <div class="side-btn" data-side="SELL" onclick="setSide('SELL')">SELL / 卖出</div>
+                    </div>
+                </div>
+
+                <div class="form-row">
+                    <div class="input-group">
+                        <label>Security ID (标的代码)</label>
+                        <div class="input-box"><input type="text" id="securityId" value="600030" required></div>
+                    </div>
+                    <div class="input-group">
+                        <label>Market (市场)</label>
+                        <div class="input-box">
+                            <select id="market">
+                                <option value="XSHG">XSHG (上交所)</option>
+                                <option value="XSHE">XSHE (深交所)</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="form-row">
+                    <div class="input-group">
+                        <label>Price (限价)</label>
+                        <div class="input-box"><input type="number" id="price" step="0.01" value="10.50" required></div>
+                    </div>
+                    <div class="input-group">
+                        <label>Quantity (数量)</label>
+                        <div class="input-box"><input type="number" id="qty" value="100" min="1" required></div>
+                    </div>
+                </div>
+
+                <div class="input-group">
+                    <label>Shareholder Account (股东代码号)</label>
+                    <div class="input-box"><input type="text" id="shareholderId" value="SH12345678" required></div>
+                </div>
+
+                <button type="submit" class="btn-submit" id="submitBtn">
+                    TRANSMIT ORDER (BUY)
+                </button>
+                <div id="submitStatus" style="margin-top:8px; font-size:11px; color:#8b949e; min-height:16px;">Ready</div>
+            </form>
+
+            <!-- 终端日志 -->
+            <div class="terminal-log" id="termLog"></div>
+        </aside>
+
+        <!-- 右侧监控大屏 -->
+        <main class="right-dashboard">
+            
+            <!-- 指数卡片 -->
+            <section class="kpi-grid">
+                <div class="kpi-card clickable" id="kpi-all" onclick="applyKpiFilter('all')">
+                    <div class="kpi-title">TOTAL SUBMITTED (总量)</div>
+                    <div class="kpi-val" id="k-total">0</div>
+                </div>
+                <div class="kpi-card clickable" id="kpi-matching" onclick="applyKpiFilter('matching')">
+                    <div class="kpi-title">MATCHING (内存队列积压)</div>
+                    <div class="kpi-val val-matching" id="k-pending">0</div>
+                </div>
+                <div class="kpi-card clickable" id="kpi-filled" onclick="applyKpiFilter('filled')">
+                    <div class="kpi-title">FILLED (全部及部分成交)</div>
+                    <div class="kpi-val val-filled" id="k-filled">0</div>
+                </div>
+                <div class="kpi-card clickable" id="kpi-rejected" onclick="applyKpiFilter('rejected')">
+                    <div class="kpi-title">REJECTED (风控及异常拦截)</div>
+                    <div class="kpi-val val-reject" id="k-rejected">0</div>
+                </div>
+            </section>
+
+            <!-- 综合订单薄 -->
+            <section class="blotter-area">
+                <div class="panel-header" style="border-bottom: none; background: #161b22; display: flex; flex-wrap: nowrap; gap: 15px; align-items: center; padding: 12px 15px;">
+                    <div style="white-space: nowrap; font-size: 12px;"><i class="fas fa-list-ul"></i> LIVE ORDER BLOTTER // 实时网关挂单薄</div>
+                    <div style="flex-grow: 1;"></div>
+                    <div style="display:flex; align-items:center; gap:6px;">
+                        <input id="search-keyword" type="text" placeholder="Search orderId/symbol/account" style="width:220px; background:#0d1117; border:1px solid #30363d; color:#c9d1d9; font-size:11px; padding:5px 8px;" />
+                        <button class="btn-gen" onclick="applySearch()" style="background:#21262d; border:1px solid #30363d; padding:4px 8px; font-size:11px;">SEARCH</button>
+                        <button class="btn-gen" onclick="clearSearch()" style="background:#21262d; border:1px solid #30363d; padding:4px 8px; font-size:11px;">CLEAR</button>
+                    </div>
+                    <div style="display: flex; gap: 15px; font-size: 11px; color: #8b949e; flex-wrap: wrap; justify-content: flex-end;">
+                        <label style="cursor: pointer;"><input type="checkbox" id="filter-matching" checked onchange="onFilterChanged()"> <span style="position: relative; top: -1px;">看 MATCHING</span></label>
+                        <label style="cursor: pointer;"><input type="checkbox" id="filter-filled" checked onchange="onFilterChanged()"> <span style="position: relative; top: -1px;">看 FILLED</span></label>
+                        <label style="cursor: pointer;"><input type="checkbox" id="filter-rejected" checked onchange="onFilterChanged()"> <span style="position: relative; top: -1px;">看 REJECTED</span></label>
+                    </div>
+                    <button class="btn-gen" onclick="fetchBlotter()" style="background:#21262d; border:1px solid #30363d; padding: 4px 10px; font-size: 11px; flex-shrink: 0;">
+                        <i class="fas fa-sync-alt"></i> SYNC
+                    </button>
+                </div>
+
+                <div class="export-toolbar">
+                    <span class="label"><i class="fas fa-file-csv"></i> CSV Export</span>
+                    <div class="quick-range-group">
+                        <button class="quick-range-btn" onclick="setQuickRange('today')">今天</button>
+                        <button class="quick-range-btn" onclick="setQuickRange('7d')">近7天</button>
+                        <button class="quick-range-btn" onclick="setQuickRange('30d')">近30天</button>
+                    </div>
+                    <label class="label">From</label>
+                    <input id="export-start-date" type="date" class="tiny-input" />
+                    <label class="label">To</label>
+                    <input id="export-end-date" type="date" class="tiny-input" />
+                    <label class="label"><input id="export-orders" type="checkbox" checked /> Orders</label>
+                    <label class="label"><input id="export-trades" type="checkbox" checked /> Trades</label>
+
+                    <div class="field-dropdown" id="order-field-dropdown">
+                        <button type="button" class="field-dropdown-btn" id="order-field-btn" onclick="toggleFieldDropdown('order')">Orders Fields: loading...</button>
+                        <div class="field-dropdown-panel" id="order-field-panel">
+                            <div class="field-dropdown-actions">
+                                <button type="button" onclick="selectAllFields('order', true)">全选</button>
+                                <button type="button" onclick="selectAllFields('order', false)">清空</button>
+                            </div>
+                            <div id="order-field-options"></div>
+                        </div>
+                    </div>
+
+                    <div class="field-dropdown" id="trade-field-dropdown">
+                        <button type="button" class="field-dropdown-btn" id="trade-field-btn" onclick="toggleFieldDropdown('trade')">Trades Fields: loading...</button>
+                        <div class="field-dropdown-panel" id="trade-field-panel">
+                            <div class="field-dropdown-actions">
+                                <button type="button" onclick="selectAllFields('trade', true)">全选</button>
+                                <button type="button" onclick="selectAllFields('trade', false)">清空</button>
+                            </div>
+                            <div id="trade-field-options"></div>
+                        </div>
+                    </div>
+
+                    <button id="btn-export-csv" class="btn-gen" onclick="exportHistoryCsv()" style="background:#1f6feb; border:1px solid #2f81f7; padding: 5px 12px; font-size: 11px;">
+                        <i class="fas fa-download"></i> EXPORT CSV
+                    </button>
+                    <div id="export-status" class="export-status">Ready for export.</div>
+                </div>
+
+                <div class="table-wrap">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>ORDER_ID</th>
+                                <th>SYMBOL</th>
+                                <th>SIDE</th>
+                                <th>PRICE</th>
+                                <th>QTY</th>
+                                <th>ACCOUNT_ID</th>
+                                <th>EXEC_RESULT (回执状态)</th>
+                                <th>ACTION</th>
+                            </tr>
+                        </thead>
+                        <tbody id="blotterTbody">
+                            <!-- JS 填充 -->
+                        </tbody>
+                    </table>
+                </div>
+                <div style="display:flex; align-items:center; justify-content:space-between; gap:10px; padding:8px 12px; border-top:1px solid #21262d; background:#0b0f14; font-size:11px; color:#8b949e;">
+                    <div id="page-meta">Page 1 / 1 | Total 0</div>
+                    <div style="display:flex; align-items:center; gap:8px;">
+                        <span id="filter-meta" style="color:#8b949e;">Filter: ALL | Visible Total: 0</span>
+                        <label for="page-size" style="color:#6e7681;">Size</label>
+                        <select id="page-size" onchange="changePageSize()" style="background:#161b22; border:1px solid #30363d; color:#c9d1d9; font-size:11px; padding:2px 6px;">
+                            <option value="100">100</option>
+                            <option value="200" selected>200</option>
+                            <option value="500">500</option>
+                            <option value="1000">1000</option>
+                        </select>
+                        <button class="btn-gen" id="btn-first" onclick="firstPage()" style="background:#21262d; border:1px solid #30363d; padding:3px 8px; font-size:11px;">FIRST</button>
+                        <button class="btn-gen" id="btn-prev" onclick="prevPage()" style="background:#21262d; border:1px solid #30363d; padding:3px 8px; font-size:11px;">PREV</button>
+                        <button class="btn-gen" id="btn-next" onclick="nextPage()" style="background:#21262d; border:1px solid #30363d; padding:3px 8px; font-size:11px;">NEXT</button>
+                        <button class="btn-gen" id="btn-last" onclick="lastPage()" style="background:#21262d; border:1px solid #30363d; padding:3px 8px; font-size:11px;">LAST</button>
+                        <label for="goto-page" style="color:#6e7681;">Go</label>
+                        <input id="goto-page" type="number" min="1" value="1" style="width:70px; background:#161b22; border:1px solid #30363d; color:#c9d1d9; font-size:11px; padding:3px 6px;" />
+                        <button class="btn-gen" onclick="goToPage()" style="background:#21262d; border:1px solid #30363d; padding:3px 8px; font-size:11px;">GO</button>
+                    </div>
+                </div>
+            </section>
+
+        </main>
+    </div>
+
+<script>
+    let globalOrders = [];
+    let currentPage = 1;
+    let pageSize = 200;
+    let totalPages = 1;
+    let totalRecords = 0;
+    let pollTimer = null;
+    const REFRESH_MS = 2000;
+    let searchKeyword = '';
+    const exportFieldsState = {
+        order: { all: [], selected: new Set() },
+        trade: { all: [], selected: new Set() }
+    };
+
+    const STATUS_GROUPS = {
+        matching: [0, 2, 3],
+        filled: [4, 6],
+        rejected: [1, 5, 7]
+    };
+
+    function selectedStatusCodes() {
+        const codes = [];
+        if (document.getElementById('filter-matching').checked) codes.push(...STATUS_GROUPS.matching);
+        if (document.getElementById('filter-filled').checked) codes.push(...STATUS_GROUPS.filled);
+        if (document.getElementById('filter-rejected').checked) codes.push(...STATUS_GROUPS.rejected);
+        return Array.from(new Set(codes));
+    }
+
+    function currentFilterLabel() {
+        const parts = [];
+        if (document.getElementById('filter-matching').checked) parts.push('MATCHING');
+        if (document.getElementById('filter-filled').checked) parts.push('FILLED');
+        if (document.getElementById('filter-rejected').checked) parts.push('REJECTED');
+        return parts.length ? parts.join('/') : 'NONE';
+    }
+
+    function isAllFiltersSelected() {
+        return document.getElementById('filter-matching').checked
+            && document.getElementById('filter-filled').checked
+            && document.getElementById('filter-rejected').checked;
+    }
+
+    function resetVisibilityForLatestOrder() {
+        let changed = false;
+        if (searchKeyword) {
+            document.getElementById('search-keyword').value = '';
+            searchKeyword = '';
+            changed = true;
+        }
+
+        if (!isAllFiltersSelected()) {
+            document.getElementById('filter-matching').checked = true;
+            document.getElementById('filter-filled').checked = true;
+            document.getElementById('filter-rejected').checked = true;
+            refreshKpiActiveState('all');
+            changed = true;
+        }
+
+        if (changed) {
+            addLog('INFO', 'VIEW RESET -> switched to ALL filters and cleared search so latest order is visible.');
+        }
+    }
+
+    function applySearch() {
+        searchKeyword = (document.getElementById('search-keyword').value || '').trim();
+        currentPage = 1;
+        fetchBlotter();
+    }
+
+    function clearSearch() {
+        document.getElementById('search-keyword').value = '';
+        searchKeyword = '';
+        currentPage = 1;
+        fetchBlotter();
+    }
+
+    function refreshKpiActiveState(mode) {
+        document.getElementById('kpi-all').classList.remove('active-filter');
+        document.getElementById('kpi-matching').classList.remove('active-filter');
+        document.getElementById('kpi-filled').classList.remove('active-filter');
+        document.getElementById('kpi-rejected').classList.remove('active-filter');
+
+        if (!mode) return;
+        const targetId = mode === 'all' ? 'kpi-all' : `kpi-${mode}`;
+        const target = document.getElementById(targetId);
+        if (target) target.classList.add('active-filter');
+    }
+
+    function applyKpiFilter(mode) {
+        const m = mode === 'matching';
+        const f = mode === 'filled';
+        const r = mode === 'rejected';
+        const all = mode === 'all';
+
+        document.getElementById('filter-matching').checked = all || m;
+        document.getElementById('filter-filled').checked = all || f;
+        document.getElementById('filter-rejected').checked = all || r;
+
+        refreshKpiActiveState(mode);
+        onFilterChanged();
+    }
+
+    function startPolling() {
+        stopPolling();
+        pollTimer = setInterval(fetchBlotter, REFRESH_MS);
+    }
+
+    function stopPolling() {
+        if (pollTimer) {
+            clearInterval(pollTimer);
+            pollTimer = null;
+        }
+    }
+
+    // --- 工业级单号生成 ---
+    function rollId() {
+        const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+        let str = "";
+        for(let i=0; i<13; i++) str += chars.charAt(Math.floor(Math.random() * chars.length));
+        const idBox = document.getElementById('clOrderId');
+        idBox.value = "CL_" + str;
+        
+        // 瞬间闪烁动画以反馈生成感知
+        idBox.style.color = '#ffffff';
+        setTimeout(() => idBox.style.color = '#58a6ff', 150);
+    }
+
+    // --- 方向开关控制 ---
+    function setSide(val) {
+        document.getElementById('side').value = val;
+        document.querySelectorAll('.side-btn').forEach(b => b.classList.remove('active'));
+        document.querySelector(`.side-btn[data-side="${val}"]`).classList.add('active');
+        
+        const btn = document.getElementById('submitBtn');
+        btn.innerText = `TRANSMIT ORDER (${val})`;
+        if(val === 'SELL') btn.classList.add('action-sell');
+        else btn.classList.remove('action-sell');
+
+        setSubmitStatus('Ready');
+
+        if (document.getElementById('termLog')) {
+            addLog('INFO', `MODE -> ${val}`);
+        }
+    }
+
+    // --- 终端日志打点 ---
+    function addLog(type, msg) {
+        const logArea = document.getElementById('termLog');
+        const ts = new Date().toISOString().substring(11, 23); // hh:mm:ss.ms
+        
+        let colorClass = 'log-tx';
+        if (type === 'OK') colorClass = 'log-rx-ok';
+        if (type === 'ERR') colorClass = 'log-rx-err';
+
+        const dom = `<div class="log-row">
+            <span class="log-time">[${ts}]</span>
+            <span class="${colorClass}">${msg}</span>
+        </div>`;
+        logArea.insertAdjacentHTML('beforeend', dom);
+        logArea.scrollTop = logArea.scrollHeight; // Auto scroll bottom
+    }
+
+    window.onload = () => {
+        addLog('INFO', "System booted. Network stack initialized.");
+        rollId();
+        setSide('BUY');
+        initExportControls();
+
+        document.querySelectorAll('.side-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const val = btn.dataset.side;
+                if (val) setSide(val);
+            });
+        });
+
+        refreshKpiActiveState('all');
+        fetchBlotter();
+        startPolling();
+
+        document.getElementById('search-keyword').addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                applySearch();
+            }
+        });
+
+        document.addEventListener('click', (e) => {
+            const orderDrop = document.getElementById('order-field-dropdown');
+            const tradeDrop = document.getElementById('trade-field-dropdown');
+            if (!orderDrop.contains(e.target)) {
+                document.getElementById('order-field-panel').classList.remove('open');
+            }
+            if (!tradeDrop.contains(e.target)) {
+                document.getElementById('trade-field-panel').classList.remove('open');
+            }
+        });
+    };
+
+    document.addEventListener('visibilitychange', () => {
+        if (document.hidden) {
+            stopPolling();
+        } else {
+            fetchBlotter();
+            startPolling();
+        }
+    });
+
+    // --- 数据统计刷子 ---
+    function computeKPIs() {
+        fetch('/api/stats')
+            .then(res => res.json())
+            .then(data => {
+                if(data.error) return;
+                document.getElementById('k-total').innerText = data.total || 0;
+                document.getElementById('k-pending').innerText = data.matching || 0;
+                document.getElementById('k-filled').innerText = data.filled || 0;
+                document.getElementById('k-rejected').innerText = data.rejected || 0;
+            })
+            .catch(e => console.error(e));
+    }
+
+    function setSubmitStatus(msg, isError=false) {
+        const el = document.getElementById('submitStatus');
+        if (!el) return;
+        el.innerText = msg;
+        el.style.color = isError ? '#f85149' : '#8b949e';
+    }
+
+    function setExportStatus(msg, isError=false) {
+        const el = document.getElementById('export-status');
+        if (!el) return;
+        el.textContent = msg;
+        el.style.color = isError ? '#f85149' : '#8b949e';
+    }
+
+    function setExportStatusHtml(html, isError=false) {
+        const el = document.getElementById('export-status');
+        if (!el) return;
+        el.innerHTML = html;
+        el.style.color = isError ? '#f85149' : '#8b949e';
+    }
+
+    function formatDateInputValue(dateObj) {
+        const year = dateObj.getFullYear();
+        const month = String(dateObj.getMonth() + 1).padStart(2, '0');
+        const day = String(dateObj.getDate()).padStart(2, '0');
+        return `${year}-${month}-${day}`;
+    }
+
+    function setQuickRange(mode) {
+        const end = new Date();
+        const start = new Date(end);
+        if (mode === 'today') {
+            // Keep start/end at same day.
+        } else if (mode === '7d') {
+            start.setDate(start.getDate() - 6);
+        } else if (mode === '30d') {
+            start.setDate(start.getDate() - 29);
+        }
+
+        document.getElementById('export-start-date').value = formatDateInputValue(start);
+        document.getElementById('export-end-date').value = formatDateInputValue(end);
+        setExportStatus(`Date range set: ${document.getElementById('export-start-date').value} ~ ${document.getElementById('export-end-date').value}`);
+    }
+
+    function toggleFieldDropdown(type) {
+        const panelId = type === 'order' ? 'order-field-panel' : 'trade-field-panel';
+        const panel = document.getElementById(panelId);
+        panel.classList.toggle('open');
+    }
+
+    function getStateByType(type) {
+        return type === 'order' ? exportFieldsState.order : exportFieldsState.trade;
+    }
+
+    function renderFieldOptions(type) {
+        const state = getStateByType(type);
+        const optionsId = type === 'order' ? 'order-field-options' : 'trade-field-options';
+        const optionsWrap = document.getElementById(optionsId);
+
+        if (!state.all.length) {
+            optionsWrap.innerHTML = '<div class="field-option" style="color:#8b949e;">No fields available</div>';
+            updateFieldDropdownSummary(type);
+            return;
+        }
+
+        const html = state.all.map((field) => {
+            const checked = state.selected.has(field) ? 'checked' : '';
+            return `<label class="field-option"><input type="checkbox" data-type="${type}" data-field="${field}" ${checked} onchange="onFieldCheckChange(this)"> ${field}</label>`;
+        }).join('');
+        optionsWrap.innerHTML = html;
+        updateFieldDropdownSummary(type);
+    }
+
+    function onFieldCheckChange(input) {
+        const type = input.getAttribute('data-type');
+        const field = input.getAttribute('data-field');
+        const state = getStateByType(type);
+        if (input.checked) state.selected.add(field);
+        else state.selected.delete(field);
+        updateFieldDropdownSummary(type);
+    }
+
+    function selectAllFields(type, checked) {
+        const state = getStateByType(type);
+        if (checked) {
+            state.selected = new Set(state.all);
+        } else {
+            state.selected = new Set();
+        }
+        renderFieldOptions(type);
+    }
+
+    function updateFieldDropdownSummary(type) {
+        const state = getStateByType(type);
+        const btnId = type === 'order' ? 'order-field-btn' : 'trade-field-btn';
+        const btn = document.getElementById(btnId);
+        const prefix = type === 'order' ? 'Orders Fields' : 'Trades Fields';
+
+        if (!state.all.length) {
+            btn.textContent = `${prefix}: no options`;
+            return;
+        }
+
+        if (state.selected.size === 0) {
+            btn.textContent = `${prefix}: 未选择`;
+            return;
+        }
+
+        if (state.selected.size === state.all.length) {
+            btn.textContent = `${prefix}: 全选 (${state.all.length})`;
+            return;
+        }
+
+        btn.textContent = `${prefix}: 已选 ${state.selected.size}/${state.all.length}`;
+    }
+
+    function selectedColumnsCsv(type) {
+        const state = getStateByType(type);
+        if (!state.selected.size) return '';
+        return Array.from(state.selected).join(',');
+    }
+
+    function initExportControls() {
+        setQuickRange('today');
+        fetch('/api/export-field-options')
+            .then(res => res.json().then(data => ({ok: res.ok, data})))
+            .then(({ok, data}) => {
+                if (!ok || data.error) {
+                    const msg = data.error || 'Failed to load field options';
+                    setExportStatus(`Field options load failed: ${msg}`, true);
+                    addLog('ERR', `EXPORT_FIELDS_FAILED -> ${msg}`);
+                    return;
+                }
+
+                const tables = data.tables || {};
+                const orderFields = Array.isArray(tables.t_exchange_order) ? tables.t_exchange_order : [];
+                const tradeFields = Array.isArray(tables.t_exchange_trade) ? tables.t_exchange_trade : [];
+
+                exportFieldsState.order.all = orderFields;
+                exportFieldsState.order.selected = new Set(orderFields);
+                exportFieldsState.trade.all = tradeFields;
+                exportFieldsState.trade.selected = new Set(tradeFields);
+
+                renderFieldOptions('order');
+                renderFieldOptions('trade');
+                setExportStatus('Field options loaded.');
+            })
+            .catch(err => {
+                setExportStatus(`Field options load failed: ${err}`, true);
+                addLog('ERR', `EXPORT_FIELDS_EXCEPTION -> ${err}`);
+            });
+    }
+
+    function exportHistoryCsv() {
+        const includeOrders = document.getElementById('export-orders').checked;
+        const includeTrades = document.getElementById('export-trades').checked;
+        if (!includeOrders && !includeTrades) {
+            setExportStatus('Please select at least one table (Orders or Trades).', true);
+            return;
+        }
+
+        if (includeOrders && !exportFieldsState.order.selected.size) {
+            setExportStatus('Orders selected but no order fields checked.', true);
+            return;
+        }
+        if (includeTrades && !exportFieldsState.trade.selected.size) {
+            setExportStatus('Trades selected but no trade fields checked.', true);
+            return;
+        }
+
+        const startDate = (document.getElementById('export-start-date').value || '').trim();
+        const endDate = (document.getElementById('export-end-date').value || '').trim();
+        if (startDate && endDate && startDate > endDate) {
+            setExportStatus('Invalid range: start date cannot be later than end date.', true);
+            return;
+        }
+
+        const payload = {
+            startDate,
+            endDate,
+            includeOrders,
+            includeTrades,
+            orderColumns: selectedColumnsCsv('order'),
+            tradeColumns: selectedColumnsCsv('trade'),
+        };
+
+        const btn = document.getElementById('btn-export-csv');
+        const origText = btn.innerHTML;
+        btn.disabled = true;
+        btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> EXPORTING';
+        setExportStatus('Exporting CSV ...');
+        addLog('INFO', `EXPORT_REQUEST -> start=${startDate || 'N/A'} end=${endDate || 'N/A'}`);
+
+        fetch('/api/export-history-csv', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(payload)
+        })
+        .then(res => res.json().then(data => ({ok: res.ok, data})))
+        .then(({ok, data}) => {
+            if (!ok || data.error) {
+                const msg = data.details || data.error || 'Export failed';
+                setExportStatus(`Export failed: ${msg}`, true);
+                addLog('ERR', `EXPORT_FAILED -> ${msg}`);
+                return;
+            }
+
+            const manifest = data.manifest || {};
+            const tables = manifest.tables || {};
+            const parts = [];
+            if (tables.t_exchange_order) {
+                parts.push(`orders=${tables.t_exchange_order.rows}`);
+            }
+            if (tables.t_exchange_trade) {
+                parts.push(`trades=${tables.t_exchange_trade.rows}`);
+            }
+
+            const summary = parts.length ? parts.join(', ') : 'rows unknown';
+            const downloadUrl = data.downloadUrl || '';
+            if (downloadUrl) {
+                const anchor = document.createElement('a');
+                anchor.href = downloadUrl;
+                anchor.style.display = 'none';
+                document.body.appendChild(anchor);
+                anchor.click();
+                document.body.removeChild(anchor);
+
+                setExportStatusHtml(`Export success: ${summary}. <a href="${downloadUrl}">点此重新下载 ZIP</a>`);
+            } else {
+                setExportStatus(`Export success: ${summary}. Manifest: ${data.manifestFile || 'N/A'}`);
+            }
+            addLog('OK', `EXPORT_OK -> ${summary}`);
+        })
+        .catch(err => {
+            setExportStatus(`Export failed: ${err}`, true);
+            addLog('ERR', `EXPORT_EXCEPTION -> ${err}`);
+        })
+        .finally(() => {
+            btn.disabled = false;
+            btn.innerHTML = origText;
+        });
+    }
+
+    // --- 发单引擎 ---
+    function handleOrderSubmit(e) {
+        e.preventDefault();
+
+        if (handleOrderSubmit._submitting) {
+            addLog('INFO', 'SUBMIT_IGNORED -> previous request still in flight');
+            return false;
+        }
+        handleOrderSubmit._submitting = true;
+
+        const form = document.getElementById('orderForm');
+        if (form && !form.reportValidity()) {
+            addLog('ERR', 'FORM_VALIDATION_FAILED');
+            setSubmitStatus('Form validation failed', true);
+            handleOrderSubmit._submitting = false;
+            return false;
+        }
+
+        const idEl = document.getElementById('clOrderId');
+        if (!idEl.value) {
+            rollId();
+        }
+        
+        const payload = {
+            clOrderId: document.getElementById('clOrderId').value,
+            market: document.getElementById('market').value,
+            securityId: document.getElementById('securityId').value,
+            side: document.getElementById('side').value === 'BUY' ? 'B' : 'S',
+            qty: parseInt(document.getElementById('qty').value),
+            price: parseFloat(document.getElementById('price').value),
+            shareholderId: document.getElementById('shareholderId').value
+        };
+
+        const btn = document.getElementById('submitBtn');
+        const origText = btn.innerText;
+        btn.innerText = ">> ROUTING...";
+        btn.disabled = true;
+        setSubmitStatus('Submitting...');
+
+        addLog('TX', `TX -> ${payload.side} ${payload.qty}x${payload.securityId} @ ${payload.price} [${payload.clOrderId}]`);
+
+        // Guard against hanging UI if network callbacks are delayed.
+        const watchdog = setTimeout(() => {
+            if (btn.disabled) {
+                btn.innerText = origText;
+                btn.disabled = false;
+                addLog('ERR', 'SUBMIT_TIMEOUT_GUARD_TRIGGERED');
+                setSubmitStatus('Submit timeout, please retry', true);
+                handleOrderSubmit._submitting = false;
+            }
+        }, 8000);
+
+        fetch('/api/order', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(payload)
+        })
+        .then(res => res.json())
+        .then(data => {
+            const code = String(data.code || '');
+            const successCodes = new Set(['0000', '2000', '3000']);
+            const isBusinessReject = code && !successCodes.has(code);
+
+            if(data.error) {
+                addLog('ERR', `RX <- GW_CRASH: ${data.details}`);
+                setSubmitStatus('Backend crash', true);
+            } else if(data.rejectCode || data.rejectText || isBusinessReject) {
+                addLog('ERR', `RX <- INTERCEPT_RISK: [${data.rejectCode||code||'500'}] ${data.rejectText || data.msg || 'Rejected'}`);
+                setSubmitStatus(`Rejected: ${data.rejectText || data.msg || code}`, true);
+            } else {
+                addLog('OK', `RX <- ENGINE_ACK: Order entered status [${data.status || 'OK'}]`);
+                setSubmitStatus('Submit success');
+            }
+            resetVisibilityForLatestOrder();
+            currentPage = 1;
+            fetchBlotter();
+            rollId(); // 滚到下一个ID
+        })
+        .catch(err => {
+            addLog('ERR', `RX <- NETWORK_TIMEOUT`);
+            setSubmitStatus('Network timeout', true);
+        })
+        .finally(() => {
+            clearTimeout(watchdog);
+            btn.innerText = origText;
+            btn.disabled = false;
+            handleOrderSubmit._submitting = false;
+        });
+        return false;
+    }
+
+    handleOrderSubmit._submitting = false;
+
+    // --- 数据薄获取渲染 ---
+    function fetchBlotter() {
+        computeKPIs();
+        const statuses = selectedStatusCodes();
+        if (statuses.length === 0) {
+            globalOrders = [];
+            totalRecords = 0;
+            totalPages = 1;
+            currentPage = 1;
+            updatePagerUI();
+            renderBlotter();
+            return;
+        }
+        const statusQuery = statuses.length > 0 ? `&statuses=${statuses.join(',')}` : '';
+        const keywordQuery = searchKeyword ? `&keyword=${encodeURIComponent(searchKeyword)}` : '';
+        fetch(`/api/orders?page=${currentPage}&size=${pageSize}${statusQuery}${keywordQuery}`)
+            .then(res => res.json())
+            .then(data => {
+                globalOrders = data.orders || [];
+                totalPages = data.totalPages || 1;
+                totalRecords = data.total || 0;
+                currentPage = data.page || currentPage;
+                updatePagerUI();
+                renderBlotter();
+            });
+    }
+
+    function updatePagerUI() {
+        const meta = document.getElementById('page-meta');
+        meta.innerText = `Page ${currentPage} / ${totalPages} | Total ${totalRecords}`;
+
+        const filterMeta = document.getElementById('filter-meta');
+        const searchPart = searchKeyword ? ` | Search: ${searchKeyword}` : '';
+        filterMeta.innerText = `Filter: ${currentFilterLabel()} | Visible Total: ${totalRecords}${searchPart}`;
+
+        document.getElementById('btn-first').disabled = currentPage <= 1;
+        document.getElementById('btn-prev').disabled = currentPage <= 1;
+        document.getElementById('btn-next').disabled = currentPage >= totalPages;
+        document.getElementById('btn-last').disabled = currentPage >= totalPages;
+
+        const gotoInput = document.getElementById('goto-page');
+        gotoInput.max = String(totalPages);
+        gotoInput.value = String(currentPage);
+    }
+
+    function firstPage() {
+        if (currentPage <= 1) return;
+        currentPage = 1;
+        fetchBlotter();
+    }
+
+    function prevPage() {
+        if (currentPage <= 1) return;
+        currentPage -= 1;
+        fetchBlotter();
+    }
+
+    function nextPage() {
+        if (currentPage >= totalPages) return;
+        currentPage += 1;
+        fetchBlotter();
+    }
+
+    function lastPage() {
+        if (currentPage >= totalPages) return;
+        currentPage = totalPages;
+        fetchBlotter();
+    }
+
+    function goToPage() {
+        const raw = parseInt(document.getElementById('goto-page').value, 10);
+        if (Number.isNaN(raw)) return;
+        const target = Math.min(Math.max(raw, 1), totalPages);
+        if (target === currentPage) return;
+        currentPage = target;
+        fetchBlotter();
+    }
+
+    function changePageSize() {
+        pageSize = parseInt(document.getElementById('page-size').value, 10) || 200;
+        currentPage = 1;
+        fetchBlotter();
+    }
+
+    function onFilterChanged() {
+        const m = document.getElementById('filter-matching').checked;
+        const f = document.getElementById('filter-filled').checked;
+        const r = document.getElementById('filter-rejected').checked;
+
+        if (m && f && r) refreshKpiActiveState('all');
+        else if (m && !f && !r) refreshKpiActiveState('matching');
+        else if (!m && f && !r) refreshKpiActiveState('filled');
+        else if (!m && !f && r) refreshKpiActiveState('rejected');
+        else refreshKpiActiveState(null);
+
+        currentPage = 1;
+        fetchBlotter();
+    }
+
+    function renderBlotter() {
+        const tbody = document.getElementById('blotterTbody');
+        if (!globalOrders || globalOrders.length === 0) {
+            tbody.innerHTML = `<tr><td colspan="8" style="text-align:center;color:#6e7681;padding:40px;">// ORDER BOOK IS EMPTY</td></tr>`;
+            return;
+        }
+
+        let html = '';
+        for (let o of globalOrders) {
+            const req = o.request || {};
+            const st = (o.status || '').toUpperCase();
+            const resp = o.response || {};
+
+            let isRejected = st.includes('REJECT') || st.includes('风险') || st.includes('失败') || st.includes('错误') || st.includes('CANCELED') || st.includes('CANCELLED') || (resp.code && resp.code !== '0000' && resp.code !== '2000');
+            let isFilled = st.includes('FILLED') || st.includes('成交');
+
+            let stClass = 's-new';
+            if (isRejected) stClass = 's-reject';
+            else if (isFilled) stClass = 's-filled';
+            else stClass = 's-matching';
+
+            let reason = resp.rejectText || resp.msg || '';
+            if (typeof resp === 'string') reason = resp;
+
+            let isBuy = (req.side === 'B' || req.side === 1 || req.side === 'BUY');
+            let sideHtml = isBuy ? `<span class="buy-text">BUY</span>` : `<span class="sell-text">SELL</span>`;
+
+            const statusCode = req.statusCode;
+            const canCancel = statusCode === 0 || statusCode === 2 || statusCode === 3;
+            const actionHtml = canCancel
+                ? `<button class="btn-gen" style="background:#21262d; border:1px solid #30363d; padding:3px 8px; font-size:10px;" onclick="cancelOrder('${req.clOrderId}','${req.market}','${req.securityId}','${req.shareholderId}','${req.side}')">CANCEL</button>`
+                : `<span style="color:#6e7681; font-size:10px;">-</span>`;
+
+            html += `
+            <tr>
+                <td class="cl-id-cell">${req.clOrderId || '--'}</td>
+                <td>
+                    <span class="symbol-cell">${req.securityId || '--'}</span>
+                    <span class="sym-market">${req.market || '--'}</span>
+                </td>
+                <td>${sideHtml}</td>
+                <td class="px-cell">${parseFloat(req.price || 0).toFixed(2)}</td>
+                <td>${req.qty || 0}</td>
+                <td style="color:#8b949e">${req.shareholderId || '--'}</td>
+                <td>
+                    <span class="status-badge ${stClass}">${st}</span>
+                    ${reason ? `<div class="reject-reason">${reason}</div>` : ''}
+                </td>
+                <td>${actionHtml}</td>
+            </tr>
+            `;
+        }
+        if (!html) {
+            tbody.innerHTML = `<tr><td colspan="8" style="text-align:center;color:#6e7681;padding:30px;">// NO ROWS MATCH CURRENT FILTER</td></tr>`;
+            return;
+        }
+        tbody.innerHTML = html;
+    }
+
+    window.addEventListener('error', (e) => {
+        addLog('ERR', `FRONTEND_ERROR: ${e.message}`);
+    });
+
+    window.addEventListener('unhandledrejection', (e) => {
+        const reason = e && e.reason ? String(e.reason) : 'Promise rejection';
+        addLog('ERR', `FRONTEND_ASYNC_ERROR: ${reason}`);
+    });
+
+    function genCancelId() {
+        const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+        let id = "C";
+        for (let i = 0; i < 15; i++) id += chars.charAt(Math.floor(Math.random() * chars.length));
+        return id;
+    }
+
+    function cancelOrder(origClOrderId, market, securityId, shareholderId, side) {
+        const payload = {
+            clOrderId: genCancelId(),
+            origClOrderId,
+            market,
+            securityId,
+            shareholderId,
+            side
+        };
+
+        addLog('TX', `TX -> CANCEL ${origClOrderId}`);
+        fetch('/api/cancel', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(payload)
+        })
+        .then(res => res.json())
+        .then(data => {
+            if (data.code === '3000' || (data.msg && data.msg.includes('成功'))) {
+                addLog('OK', `RX <- CANCEL_ACK: ${origClOrderId} ${data.msg || 'OK'}`);
+            } else {
+                addLog('ERR', `RX <- CANCEL_REJECT: ${data.rejectText || data.msg || 'Unknown'}`);
+            }
+            fetchBlotter();
+        })
+        .catch(() => addLog('ERR', `RX <- CANCEL_NETWORK_TIMEOUT`));
+    }
+
+</script>
+</body>
+</html>

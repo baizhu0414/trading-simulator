@@ -1,0 +1,151 @@
+{
+  "input": {
+    "orders_file": "data/orders_20260306212300.csv",
+    "trades_file": "data/trades_20260306212300.csv"
+  },
+  "orders": {
+    "total_orders": 307879,
+    "status_distribution": {
+      "6": {
+        "name": "FULL_FILLED",
+        "count": 293163,
+        "ratio": 0.952202
+      },
+      "5": {
+        "name": "CANCELED",
+        "count": 13267,
+        "ratio": 0.043092
+      },
+      "4": {
+        "name": "PART_FILLED",
+        "count": 1419,
+        "ratio": 0.004609
+      },
+      "3": {
+        "name": "NOT_FILLED",
+        "count": 30,
+        "ratio": 9.7e-05
+      }
+    },
+    "side_distribution": {
+      "B": 200593,
+      "S": 107286
+    },
+    "market_distribution": {
+      "XSHG": 307879
+    },
+    "top_securities_by_order_count": {
+      "600030": 307878,
+      "600040": 1
+    },
+    "top_shareholders_by_order_count": {
+      "SH00000001": 200593,
+      "SH00000002": 107285,
+      "SH00000007": 1
+    },
+    "qty_sum": 6115700,
+    "original_qty_sum": 72688200,
+    "notional_sum": 61279312.0,
+    "avg_order_notional": 199.04,
+    "invalid_price_count": 0
+  },
+  "trades": {
+    "total_trades": 238462,
+    "total_exec_qty": 33402000,
+    "total_turnover": 334688040.0,
+    "vwap": 10.02,
+    "max_exec_price": 10.02,
+    "min_exec_price": 10.02,
+    "market_distribution": {
+      "XSHG": 238462
+    },
+    "top_securities_by_trade_count": {
+      "600030": 238462
+    },
+    "top_securities_by_trade_qty": {
+      "600030": 33402000
+    },
+    "top_buyers_by_trade_count": {
+      "SH00000001": 238462
+    },
+    "top_sellers_by_trade_count": {
+      "SH00000002": 238462
+    }
+  },
+  "consistency": {
+    "trade_order_reference_total": 476924,
+    "trade_order_reference_matched": 476924,
+    "buy_order_reference_missing": 0,
+    "sell_order_reference_missing": 0,
+    "reference_match_ratio": 1.0
+  },
+  "interfaces": {
+    "order_fields_found": [
+      "cl_order_id",
+      "create_time",
+      "id",
+      "market",
+      "original_qty",
+      "price",
+      "qty",
+      "security_id",
+      "shareholder_id",
+      "side",
+      "status",
+      "version"
+    ],
+    "order_fields_missing": [],
+    "trade_fields_found": [
+      "buy_cl_order_id",
+      "buy_shareholder_id",
+      "exec_id",
+      "exec_price",
+      "exec_qty",
+      "id",
+      "market",
+      "security_id",
+      "sell_cl_order_id",
+      "sell_shareholder_id",
+      "trade_time"
+    ],
+    "trade_fields_missing": [],
+    "observed_side_values": [
+      "B",
+      "S"
+    ],
+    "observed_market_values": [
+      "XSHG"
+    ],
+    "observed_status_flow": [
+      {
+        "code": "3",
+        "name": "NOT_FILLED"
+      },
+      {
+        "code": "4",
+        "name": "PART_FILLED"
+      },
+      {
+        "code": "5",
+        "name": "CANCELED"
+      },
+      {
+        "code": "6",
+        "name": "FULL_FILLED"
+      }
+    ]
+  },
+  "project_understanding": {
+    "insights": [
+      "系统采用订单表与成交表分离设计，形成下单与撮合结果的双表闭环。",
+      "订单主键链路是 cl_order_id，成交链路通过 buy_cl_order_id/sell_cl_order_id 回指订单。",
+      "状态码体现了完整的订单生命周期，尤其是 6=FULL_FILLED 与 5=CANCELED 两种高频终态。",
+      "根据成交数据可推导撮合接口包含 exec_id、exec_qty、exec_price、trade_time 等关键字段。"
+    ],
+    "diagnostics": [
+      "订单数=307879, 成交笔数=238462, 全成订单数=293163, 撤单数=13267",
+      "成交-订单引用匹配率=100.00%",
+      "成交引用完整，说明订单与成交链路一致性良好。"
+    ]
+  }
+}

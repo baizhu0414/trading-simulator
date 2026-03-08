@@ -1,0 +1,15 @@
+{
+  "export_time": "2026-03-06T21:23:00.375885",
+  "database": "trading_db",
+  "host": "127.0.0.1",
+  "tables": {
+    "t_exchange_order": {
+      "file": "data/orders_20260306212300.csv",
+      "rows": 307879
+    },
+    "t_exchange_trade": {
+      "file": "data/trades_20260306212300.csv",
+      "rows": 238462
+    }
+  }
+}

@@ -1,0 +1,48 @@
+{
+  "export_time": "2026-03-08T15:24:31.178818",
+  "database": "trading_db",
+  "host": "127.0.0.1",
+  "filters": {
+    "start_time": "2026-03-08 00:00:00",
+    "end_time": "2026-03-08 23:59:59"
+  },
+  "tables": {
+    "t_exchange_order": {
+      "file": "/home/group10/trading_services/data_analysis/data/orders_20260308152431.csv",
+      "rows": 0,
+      "columns": [
+        "id",
+        "cl_order_id",
+        "shareholder_id",
+        "market",
+        "security_id",
+        "side",
+        "qty",
+        "original_qty",
+        "price",
+        "status",
+        "create_time",
+        "version"
+      ],
+      "time_column": "create_time"
+    },
+    "t_exchange_trade": {
+      "file": "/home/group10/trading_services/data_analysis/data/trades_20260308152431.csv",
+      "rows": 0,
+      "columns": [
+        "id",
+        "exec_id",
+        "buy_cl_order_id",
+        "sell_cl_order_id",
+        "exec_qty",
+        "exec_price",
+        "trade_time",
+        "market",
+        "security_id",
+        "buy_shareholder_id",
+        "sell_shareholder_id"
+      ],
+      "time_column": "trade_time"
+    }
+  }
+}
