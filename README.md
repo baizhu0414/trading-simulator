@@ -1,4 +1,6 @@
-
+> - JAVA [README详细介绍了项目功能设计、相关测试案例等内容](trading_services/README.md)。
+> - C++
+> - Python
 
 # 1. 项目配置方式
 ## 1.1 Java
@@ -9,10 +11,55 @@
 3. 安装插件：LomBok必须安装
 4. 可能问题
 	- 运行遇到get方法确实问题：1）安装插件LomBok；2）配置Annotation processing为自动获取。
+5. 引入MySQL数据库，构造订单数据库，初步实现订单持久化；
+
+- [MySQL84下载地址](https://downloads.mysql.com/archives/community/?spm=a2c6h.12873639.article-detail.8.1096ff482CMmyx)
+
+- [MySQL84安装教程](https://blog.csdn.net/m0_65663088/article/details/140001290)
+
+6. 引入APM工具监控：Prometheus+Grafana
+  - [安装步骤](https://blog.csdn.net/u011537504/article/details/148832817)
+  -  数据源9090（Prometheus）、3000（Grafana）、9104（MySQL）
+        > mysqld_exporter：http://localhost:9104/metrics（能看到 mysql 指标）；
+        >
+        > Prometheus：http://localhost:9090/targets（mysql 任务状态为 UP）；
+        > 
+        > Grafana：http://localhost:3000（登录后导入 7362 大盘即可看 MySQL 监控，注意有30s左右延迟）。
+  -  监控数据：http://localhost:8081/trading/actuator/prometheus
+  -  [数据库监控](https://blog.csdn.net/Hu_wen/article/details/136930892)
+     -  [安装包](https://prometheus.io/download/#mysqld_exporter)
+  - 单个启动命令
+    > .\prometheus.exe --config.file=prometheus.yml
+    >
+    > .\bin\grafana-server.exe
+    >
+    > .\mysqld_exporter.exe --config.my-cnf=.my.cnf
+  -  导入SpringBoot 官方大盘 ID：12856(JVM)、7362（MySQL）
+  -  给出一个一键启动的 .bat 脚本，双击就能跑（Windows平台）
+  -  自定义表盘（包括：JVM/MySQL/订单数量和成交状态等）
+
+        <div style="display:flex; gap:10px;">
+        <img src="./trading_services/docs/monitoring/09-自定义指标监控.png" width="48%" />
+        <img src="./trading_services/docs/monitoring/09-2自定义表盘展示.png" width="48%" />
+        </div>
+7. 安装Redis用于暂存数据库记录，便于失败重试。
 
 ## 1.2 C++（开发者补充）
 
-## 1.3 Python（开发者补充）
+## 1.3 Python（风控服务）
+1. 安装 Python >= 3.10：[下载地址](https://www.python.org/downloads/)
+2. 安装依赖并启动：
+```bash
+cd native-modules/python/risk
+pip install -r requirements.txt
+python main.py
+```
+3. 服务启动后：
+   - 风控检查：`POST http://localhost:9002/api/risk/check`
+   - 健康检查：`GET  http://localhost:9002/api/risk/health`
+   - Swagger 文档：`http://localhost:9002/docs`
+4. 运行测试：`pytest tests/ -v`
+5. 接口文档：详见 `docs/risk_service_api.md`
 
 
 # 2. 项目参考架构
@@ -23,8 +70,9 @@ trading-simulator/
 ├── native-modules/
 │   ├── cpp/（端口 9001）
 │   │   └── matcher/        # C++ 高性能撮合
-│   └── python/（端口 9002）
+│   └── python/（端口 9002、9003）
 │       └── risk/           # Python 风控/原型
+│       └── market/
 ├── protocol/               # IPC协议/功能字段定义（JSON 示例、proto 草案）
 └── docs/                   # 任务书，周报模板
 ```
@@ -70,13 +118,12 @@ bugfix/ID-问题：bug 修复分支。
 
 2. 第二步：用 Labels（标签）分类管理需求
 
-    | 标签类型 | 示例标签 | 作用 |
-    |----------|----------|------|
-    | 需求类型 | type/feature（新功能）、type/bug（bug 修复）、type/optimize（优化） | 区分需求性质 |
-    | 状态 | status/to-do（待办）、status/in-progress（开发中）、status/review（待验收）、status/done（完成） | 跟踪需求进度 |
-    | 所属模块 | module/java、module/cpp、module/ipc | 关联到 Java/C++ 模块，方便分工 |
-    | 优先级 | priority/high、priority/medium、priority/low | 区分需求紧急程度 |
-
+| 标签类型   | 示例标签                                                                 | 作用                 |
+|------------|--------------------------------------------------------------------------|----------------------|
+| 需求类型   | type/feature（新功能）、type/bug（bug 修复）、type/optimize（优化）       | 区分需求性质         |
+| 状态       | status/to-do（待办）、status/in-progress（开发中）、status/review（待验收）、status/done（完成） | 跟踪需求进度         |
+| 所属模块   | module/java、module/cpp、module/ipc                                      | 关联到 Java/C++ 模块，方便分工 |
+| 优先级     | priority/high、priority/medium、priority/low                             | 区分需求紧急程度     |
 3. 第三步：用 Milestone（里程碑）规划需求版本
 
     把相关需求归类到里程碑（比如 “v1.0 基础 IPC 通信”），明确版本交付目标：

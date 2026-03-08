@@ -1,6 +1,102 @@
 spring:
   application:
     name: trading-simulator
+  # MySQL数据源配置
+  datasource:
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    url: jdbc:mysql://localhost:10001/trading_db?useUnicode=true&characterEncoding=utf8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true
+    username: test
+    password: test
+    # Druid 连接池具体配置
+    druid:
+      # 初始连接数
+      initial-size: 10
+      # 最小空闲连接
+      min-idle: 10
+      # 最大活跃连接数 (核心配置：根据你的 DB 服务器配置设置，通常设为 CPU核数 * 2 + 1 或 20-50)
+      max-active: 20
+      # 获取连接等待超时时间 (毫秒)
+      max-wait: 3000
+
+      # 配置间隔多久才进行一次检测，检测需要关闭的空闲连接
+      time-between-eviction-runs-millis: 60000
+      # 配置一个连接在池中最小生存的时间
+      min-evictable-idle-time-millis: 300000
+
+      # 用来检测连接是否有效的sql
+      validation-query: SELECT 1
+      # 申请连接时执行validationQuery检测连接是否有效，建议配置为true，不影响性能，并保证安全性
+      test-while-idle: true
+      validation-query-timeout: 2 # 连接验证超时时间
+      # 申请连接时执行validationQuery检测连接是否有效，会降低性能
+      test-on-borrow: false
+      # 归还连接时执行validationQuery检测连接是否有效，会降低性能
+      test-on-return: false
+
+      # 打开PSCache，并且指定每个连接上PSCache的大小 (MySQL 建议开启)
+      pool-prepared-statements: true
+      max-pool-prepared-statement-per-connection-size: 20
+
+      # 配置监控统计拦截的filters
+      # stat: 监控统计; log4j2: 日志; wall: 防火墙(防止SQL注入)
+      filters: stat,slf4j
+
+      # WebStatFilter 配置
+      web-stat-filter:
+        enabled: true
+        url-pattern: /*
+        exclusions: "*.js,*.gif,*.jpg,*.png,*.css,*.ico,/druid/*"
+
+      # StatViewServlet 配置 (Druid 监控后台)
+      stat-view-servlet:
+        enabled: true
+        # 监控后台访问路径：http://localhost:8081/druid/index.html
+        url-pattern: /druid/*
+        # 允许清空统计数据
+        reset-enable: false
+        # 监控后台的账号密码 (建议设置)
+        login-username: admin
+        login-password: admin123
+
+  # MyBatis配置
+  mybatis:
+    mapper-locations: classpath:mapper/*.xml  # Mapper XML文件位置
+    # 全局注册TypeHandler
+    type-handlers-package: com.example.trading.common.typehandler
+    type-aliases-package: com.example.trading.domain.model  # 实体类别名包
+    configuration:
+      map-underscore-to-camel-case: true  # 下划线转驼峰（适配MySQL字段名）
+      log-impl: org.apache.ibatis.logging.slf4j.Slf4jImpl  # 打印SQL日志（便于优化）
+      default-enum-type-handler: org.apache.ibatis.type.EnumOrdinalTypeHandler # 枚举类型默认处理方式（可选）
+  data:
+    redis:
+      host: localhost
+      port: 6379
+      password:
+      database: 0
+      timeout: 3000ms
+
+db:
+  persist:
+    retry:
+      count: 3 # 异步持久化重试次数
+
+# 系统日志，卡死的时候用于排查对象初始化过程。比如：DisruptorManager之前写了直接初始化对象的时候就用对象池，会耗尽时间和内存，卡死。
+#logging:
+#  level:
+#    root: INFO
+#    org.springframework: DEBUG  # 开启Spring核心日志
+#    com.alibaba.druid: DEBUG   # 开启Druid连接池日志
+#    io.lettuce.core: DEBUG      # 开启Redis客户端日志（如果用Lettuce）
+#  pattern:
+#    console: "%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n"
+
+# MyBatis分页插件配置（可选）
+pagehelper:
+  helper-dialect: mysql
+  reasonable: true
+  support-methods-arguments: true
+  params: count=countSql
 
 server:
   port: 8081
@@ -10,18 +106,33 @@ server:
 
 # 自定义配置
 trading:
-  # 风控配置
-  risk:
-    self-trade:
-      enable: true # 是否开启对敲风控
-      time-window: 60000 # 对敲检测时间窗口（毫秒）
   # 撮合配置
   matching:
-    price-strategy: MID_PRICE # 可选值：MID_PRICE（中间价）、BUY_PRICE（买方价）、SELL_PRICE（卖方价）
-    zero-share:
-      enable: true # 是否支持零股成交
-  # 数据存储
-  data:
-    input-path: ./data/input/
-    output-path: ./data/output/
-    history-path: ./data/history/
+    zero-share-enable: false # 是否支持零股成交
+
+  recovery:
+    enable: true
+    recover-status: PROCESSING,MATCHING,NOT_FILLED,PART_FILLED # 应用崩溃或其他情况，重启加载未完成订单。
+    batch-size: 100 # 一页加载的订单数
+
+# 监控配置
+management:
+  endpoints:
+    web:
+      exposure:
+        include: 'prometheus,health,metrics,info'  # 暴露Prometheus可抓取的端点
+      base-path: /actuator  # Actuator 默认基础路径
+  metrics:
+    tags:
+      application: ${spring.application.name} # 给所有指标添加应用名标签
+    distribution:  # 修正：distribution 必须在 metrics 下级
+      percentiles-histogram:
+        all: true  # 开启Histogram（与@Timed的histogram=true匹配）
+      # 移除 percentiles.all 配置：因为开启histogram后，percentiles（Summary配置）无意义且冲突
+  endpoint:
+    health:
+      show-details: always  # 显示健康详情
+  prometheus:
+    metrics:
+      export:
+        enabled: true

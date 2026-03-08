@@ -1,22 +1,34 @@
 package com.example.trading.domain.engine;
 
+import com.example.trading.domain.engine.result.MatchingResult;
 import com.example.trading.domain.model.Order;
 import com.example.trading.common.enums.OrderStatusEnum;
 import com.example.trading.common.enums.SideEnum;
+import com.example.trading.domain.model.Trade;
+import com.example.trading.util.ExecIdGenUtils;
+import io.micrometer.core.annotation.Timed;
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.Gauge;
+import io.micrometer.core.instrument.MeterRegistry;
+import jakarta.annotation.PostConstruct;
+import lombok.AllArgsConstructor;
+import lombok.Data;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Component;
 
-import java.util.Queue;
+import java.math.BigDecimal;
+import java.time.LocalDateTime;
+import java.util.*;
 import java.util.concurrent.ConcurrentSkipListMap;
+import java.util.concurrent.PriorityBlockingQueue;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /**
- * 撮合引擎
- * 核心逻辑：
- * 1. 买订单（BUY）优先匹配卖队列的最低价格；
- * 2. 卖订单（SELL）优先匹配买队列的最高价格；
- * 3. 支持部分成交，剩余订单继续挂单；
- * 4. 全程线程安全，基于OrderBook的线程安全容器实现。
+ * 撮合引擎：统一成交价生成+标准化原子操作+成交订单记录Trade+被动撮合+主动撮合+部分成交+对手方订单撤回
+ * 注意：Trade 保存的唯一主体
  */
 @Slf4j
 @Component
@@ -24,137 +36,355 @@ import java.util.concurrent.ConcurrentSkipListMap;
 public class MatchingEngine {
     private final OrderBook orderBook;
     private final PriceGenerator priceGenerator;
+    @Value("${trading.matching.zero-share-enable:false}")
+    private boolean zeroShareEnable;
+
+    private final MeterRegistry meterRegistry;
+    /* 订单簿中订单总数 */
+    private AtomicInteger orderBookOrderCount;
+    /* 被动撮合成交总次数计数器 */
+    private Counter tradeTotalCounter;
+    /* 主动撮合成交总次数计数器 */
+    private Counter tradeRecoveryTotalCounter;
+    /* 撤单请求总次数计数器 */
+    private Counter cancelRequestTotalCounter;
+
+    @PostConstruct
+    public void initMetrics() {
+        tradeTotalCounter = meterRegistry.counter("trading.trade.total");
+        tradeRecoveryTotalCounter = meterRegistry.counter("trading.trade.recovery.total");
+        cancelRequestTotalCounter = meterRegistry.counter("trading.cancel.request.total");
+        orderBookOrderCount = new AtomicInteger(0);
+        Gauge.builder("trading.orderbook.orders", orderBookOrderCount, AtomicInteger::get)
+                .description("订单簿中当前订单总数")
+                .register(meterRegistry);
+        log.info("撮合引擎监控指标初始化完成");
+    }
 
     /**
-     * 执行撮合逻辑（价格优先+时间优先）
-     * @param newOrder 新提交的订单
-     * @return 撮合后的订单（包含成交状态/剩余数量）
+     * 被动撮合：新订单进入交易所的核心逻辑
      */
-    public Order match(Order newOrder) {
-        if (newOrder == null || newOrder.getQty() <= 0) {
-            log.error("新订单非法，无法撮合：{}", newOrder);
-            newOrder.setStatus(OrderStatusEnum.REJECTED);
-            return newOrder;
-        }
-
+    /**
+     * 被动撮合：新订单进入交易所的核心逻辑（修复 ConcurrentModificationException）
+     */
+    @Timed(value = "trading.order.match.time", description = "订单撮合耗时，在order过程中")
+    public MatchingResult match(Order newOrder) {
         String securityId = newOrder.getSecurityId();
         SideEnum newOrderSide = newOrder.getSide();
-        int remainingQty = newOrder.getQty(); // 剩余未成交数量
-        newOrder.setStatus(OrderStatusEnum.MATCHING);
+        BigDecimal newOrderPrice = newOrder.getPrice();
+        int newOrderRemainingQty = newOrder.getQty();
+        boolean isNewOrderBuy = newOrderSide == SideEnum.BUY;
 
-        try {
-            // 1. 获取对手方的价格有序Map（买找卖，卖找买）
-            SideEnum counterSide = newOrderSide == SideEnum.BUY ? SideEnum.SELL : SideEnum.BUY;
-            ConcurrentSkipListMap<Double, Queue<Order>> counterPriceMap = orderBook.getPriceMap(securityId, counterSide);
+        MatchingResult matchingResult = MatchingResult.builder()
+                .matchedOrder(newOrder)
+                .matchDetails(new ArrayList<>())
+                .build();
 
-            // 2. 遍历对手方最优价格，逐笔撮合（直到剩余数量为0或无匹配价格）
-            for (Double counterPrice : counterPriceMap.keySet()) {
-                // 终止条件：剩余数量为0 或 当前价格不满足撮合条件
-                if (remainingQty <= 0 || !isPriceMatch(newOrderSide, newOrder.getPrice(), counterPrice)) {
-                    break;
+        // 1. 确定对手方向，获取对手方价格Map
+        SideEnum oppositeSide = isNewOrderBuy ? SideEnum.SELL : SideEnum.BUY;
+        TreeMap<BigDecimal, Deque<Order>> oppositePriceMap = orderBook.getPriceMap(securityId, oppositeSide);
+
+        // ✅ 核心修复1：迭代价格集合的副本，避免直接迭代原Map触发快速失败
+        List<BigDecimal> priceList = new ArrayList<>(oppositePriceMap.keySet());
+        // 按价格优先顺序排序（卖单升序，买单降序）
+        if (isNewOrderBuy) {
+            // 买单：卖单价格升序（从低到高）
+            Collections.sort(priceList);
+        } else {
+            // 卖单：买单价格降序（从高到低）
+            Collections.sort(priceList, Collections.reverseOrder());
+        }
+
+        // 2. 遍历价格副本（价格优先）
+        for (BigDecimal oppositePrice : priceList) {
+            // 提前终止：主动单已完全成交
+            if (newOrderRemainingQty <= 0) {
+                break;
+            }
+
+            // 严格校验成交前提：买价≥卖价/卖价≤买价
+            if (isNewOrderBuy) {
+                if (newOrderPrice.compareTo(oppositePrice) < 0) {
+                    break; // 后续价格更高，无需遍历
                 }
+            } else {
+                if (newOrderPrice.compareTo(oppositePrice) > 0) {
+                    break; // 后续价格更低，无需遍历
+                }
+            }
 
-                // 3. 获取当前价格下的对手方订单队列
-                Queue<Order> counterOrderQueue = counterPriceMap.get(counterPrice);
-                if (counterOrderQueue == null || counterOrderQueue.isEmpty()) {
+            // 从原Map获取订单队列（避免副本过期）
+            Deque<Order> oppositeOrderQueue = oppositePriceMap.get(oppositePrice);
+            if (oppositeOrderQueue == null || oppositeOrderQueue.isEmpty()) {
+                // ✅ 直接操作原Map移除空价格节点
+                oppositePriceMap.remove(oppositePrice);
+                continue;
+            }
+
+            // 3. 同价格下，时间优先撮合
+            while (!oppositeOrderQueue.isEmpty() && newOrderRemainingQty > 0) {
+                Order oppositeOrder = oppositeOrderQueue.peek();
+                int oppositeRemainingQty = oppositeOrder.getQty();
+
+                // 零股订单直接移除
+                if (oppositeRemainingQty <= 0 || (!zeroShareEnable && oppositeRemainingQty < 100)) {
+                    oppositeOrderQueue.poll();
                     continue;
                 }
 
-                // 4. 逐笔匹配队列中的订单（时间优先）
-                while (remainingQty > 0 && !counterOrderQueue.isEmpty()) {
-                    Order counterOrder = counterOrderQueue.peek(); // 取队首订单（不移除）
-                    if (counterOrder == null) {
-                        break;
-                    }
-
-                    // 5. 计算成交数量（取新订单剩余量 和 对手方订单剩余量的最小值）
-                    int matchQty = Math.min(remainingQty, counterOrder.getQty());
-                    // 6. 生成成交价
-                    double matchPrice = priceGenerator.generatePrice(newOrder, counterOrder);
-
-                    // 7. 执行成交逻辑
-                    executeMatch(newOrder, counterOrder, matchQty, matchPrice);
-
-                    // 8. 更新剩余数量
-                    remainingQty -= matchQty;
-
-                    // 9. 若对手方订单完全成交，从队列移除
-                    if (counterOrder.getQty() == 0) {
-                        counterOrderQueue.poll(); // 移除队首订单
-                        log.info("对手方订单[{}]完全成交，已从队列移除", counterOrder.getClOrderId());
-                    }
-
-                    // 10. 若新订单剩余量为0，终止撮合
-                    if (remainingQty <= 0) {
-                        break;
+                // 4. 计算成交数量
+                int tradeQty = Math.min(newOrderRemainingQty, oppositeRemainingQty);
+                if (!zeroShareEnable) {
+                    tradeQty = (tradeQty / 100) * 100;
+                    if (tradeQty <= 0) {
+                        oppositeOrderQueue.poll();
+                        continue;
                     }
                 }
 
-                // 11. 若当前价格队列空，移除该价格节点
-                if (counterOrderQueue.isEmpty()) {
-                    counterPriceMap.remove(counterPrice);
-                    log.info("股票[{}]对手方[{}]价格[{}]队列已空，移除该价格节点",
-                            securityId, counterSide.getDesc(), counterPrice);
+                // 5. 生成成交价（被动方价格）
+                BigDecimal execPrice = oppositePrice;
+
+                log.info("撮合成交：{}主动单[{}]与{}被动单[{}]，股票[{}]，成交价[{}]，成交数量[{}]",
+                        newOrderSide.getDesc(), newOrder.getClOrderId(),
+                        oppositeSide.getDesc(), oppositeOrder.getClOrderId(),
+                        securityId, execPrice, tradeQty);
+
+                tradeTotalCounter.increment();
+
+                // 6. ✅ 核心修复2：修正参数错误，更新主动单（newOrder）而非被动单
+                newOrderRemainingQty -= tradeQty;
+                newOrder.setQty(newOrderRemainingQty);
+                updateOrderStatusAndOrderBook(newOrder, newOrderRemainingQty, newOrder.getOriginalQty(), true);
+
+                // 7. 更新被动单
+                int newOppositeQty = oppositeRemainingQty - tradeQty;
+                oppositeOrder.setQty(newOppositeQty);
+                updateOrderStatusAndOrderBook(oppositeOrder, newOppositeQty, oppositeOrder.getOriginalQty(), false);
+
+                // 8. 记录撮合结果
+                matchingResult.addMatchDetail(oppositeOrder, tradeQty, execPrice);
+
+                // 9. 被动单完全成交，从队列移除
+                if (newOppositeQty <= 0) {
+                    oppositeOrderQueue.poll();
                 }
             }
 
-            // 8. 更新新订单状态
-            updateNewOrderStatus(newOrder, remainingQty);
-
-            // 9. 若新订单未完全成交，添加到订单簿挂单
-            if (remainingQty > 0) {
-                newOrder.setQty(remainingQty);
-                orderBook.addOrder(newOrder);
-                log.info("新订单[{}]部分成交，剩余数量[{}]已挂单", newOrder.getClOrderId(), remainingQty);
-            } else {
-                log.info("新订单[{}]完全成交，无需挂单", newOrder.getClOrderId());
+            // 10. 价格队列为空，从原Map移除该价格节点
+            if (oppositeOrderQueue.isEmpty()) {
+                oppositePriceMap.remove(oppositePrice);
             }
-
-        } catch (Exception e) {
-            log.error("撮合订单[{}]时发生异常", newOrder.getClOrderId(), e);
-            newOrder.setStatus(OrderStatusEnum.REJECTED);
         }
 
-        return newOrder;
+        // 11. 主动单未完全成交，加入订单簿
+        if (newOrderRemainingQty > 0) {
+            orderBook.addOrder(newOrder);
+        }
+
+        return matchingResult;
+    }
+
+    /**
+     * 主动撮合：指定股票的存量订单
+     */
+    public List<RecoveryMatchResult> matchOrderBookOrders(String securityId) {
+        log.info("开始主动撮合股票[{}]的存量订单", securityId);
+        List<RecoveryMatchResult> allResults = new ArrayList<>();
+
+        TreeMap<BigDecimal, Deque<Order>> buyPriceMap = orderBook.getPriceMap(securityId, SideEnum.BUY);
+        TreeMap<BigDecimal, Deque<Order>> sellPriceMap = orderBook.getPriceMap(securityId, SideEnum.SELL);
+
+        if (buyPriceMap.isEmpty() || sellPriceMap.isEmpty()) {
+            log.info("股票[{}]订单簿无匹配的买卖订单，跳过主动撮合", securityId);
+            return allResults;
+        }
+
+        Iterator<Map.Entry<BigDecimal, Deque<Order>>> buyIterator = buyPriceMap.entrySet().iterator();
+        while (buyIterator.hasNext()) {
+            Map.Entry<BigDecimal, Deque<Order>> buyEntry = buyIterator.next();
+            BigDecimal buyPrice = buyEntry.getKey();
+            Deque<Order> buyQueue = buyEntry.getValue();
+
+            if (buyQueue.isEmpty()) {
+                buyIterator.remove();
+                continue;
+            }
+
+            Iterator<Map.Entry<BigDecimal, Deque<Order>>> sellIterator = sellPriceMap.entrySet().iterator();
+            while (sellIterator.hasNext()) {
+                Map.Entry<BigDecimal, Deque<Order>> sellEntry = sellIterator.next();
+                BigDecimal sellPrice = sellEntry.getKey();
+                Deque<Order> sellQueue = sellEntry.getValue(); // 按时间排序
+
+                if (sellQueue.isEmpty()) {
+                    sellIterator.remove();
+                    continue;
+                }
+
+                if (buyPrice.compareTo(sellPrice) < 0) {
+                    break;
+                }
+
+                List<RecoveryMatchResult> batchResults = matchOrderPairWithPartialFill(buyQueue, sellQueue, securityId);
+                allResults.addAll(batchResults);
+
+                if (sellQueue.isEmpty()) {
+                    sellIterator.remove();
+                }
+                if (buyQueue.isEmpty()) {
+                    break;
+                }
+            }
+
+            if (buyQueue.isEmpty()) {
+                buyIterator.remove();
+            }
+        }
+
+        log.info("股票[{}]存量订单主动撮合完成", securityId);
+        return allResults;
+    }
+
+    /**
+     * 更新订单状态,可能删除订单、更新状态等
+     */
+    private void updateOrderStatusAndOrderBook(Order order, int remainingQty, int originalQty, boolean isNewOrder) {
+        if (remainingQty == 0) {
+            order.setStatus(OrderStatusEnum.FULL_FILLED);
+            orderBook.removeOrder(order);
+        } else if (remainingQty < originalQty) {
+            order.setStatus(OrderStatusEnum.PART_FILLED);
+            if (isNewOrder && !orderBook.containsOrder(order)) {
+                orderBook.addOrder(order);
+            }
+        } else {
+            order.setStatus(OrderStatusEnum.NOT_FILLED);
+            if (isNewOrder) {
+                orderBook.addOrder(order);
+            }
+        }
+        // 更新订单簿订单总数
+        orderBookOrderCount.set(orderBook.getAllOrders().size());
+    }
+
+    /**
+     * 主动撮合：订单对撮合
+     */
+    public List<RecoveryMatchResult> matchOrderPairWithPartialFill(Deque<Order> buyQueue, Deque<Order> sellQueue, String securityId) {
+        List<RecoveryMatchResult> results = new ArrayList<>();
+        while (!buyQueue.isEmpty() && !sellQueue.isEmpty()) {
+            Order buyOrder = buyQueue.peek();
+            Order sellOrder = sellQueue.peek();
+
+            if (buyOrder == null || sellOrder == null) {
+                break;
+            }
+
+            int buyRemainingQty = buyOrder.getQty();
+            int sellRemainingQty = sellOrder.getQty();
+            if (buyRemainingQty <= 0 || sellRemainingQty <= 0) {
+                if (buyRemainingQty <= 0) buyQueue.poll();
+                if (sellRemainingQty <= 0) sellQueue.poll();
+                continue;
+            }
+
+            // 计算成交数量
+            int tradeQty = Math.min(buyRemainingQty, sellRemainingQty);
+            if (!zeroShareEnable) {
+                tradeQty = (tradeQty / 100) * 100;
+                if (tradeQty <= 0) {
+                    log.warn("主动撮合：买单[{}]与卖单[{}]可成交数量{}非100倍数，零股禁用，跳过",
+                            buyOrder.getClOrderId(), sellOrder.getClOrderId(), tradeQty);
+                    break;
+                }
+            }
+
+            BigDecimal matchPrice = priceGenerator.generatePrice(buyOrder, sellOrder);
+
+            // 更新订单剩余股数
+            buyOrder.setQty(buyOrder.getQty() - tradeQty);
+            sellOrder.setQty(sellOrder.getQty() - tradeQty);
+
+            // 更新订单状态,移除orderBook队列
+            if (buyOrder.getQty() == 0) {
+                buyOrder.setStatus(OrderStatusEnum.FULL_FILLED);
+                buyQueue.poll();
+            } else {
+                buyOrder.setStatus(OrderStatusEnum.PART_FILLED);
+            }
+            if (sellOrder.getQty() == 0) {
+                sellOrder.setStatus(OrderStatusEnum.FULL_FILLED);
+                sellQueue.poll();
+            } else {
+                sellOrder.setStatus(OrderStatusEnum.PART_FILLED);
+            }
+
+            Trade trade = new Trade();
+            trade.setExecId(ExecIdGenUtils.generateExecId());
+            trade.setExecQty(tradeQty);
+            trade.setExecPrice(matchPrice);
+            trade.setTradeTime(LocalDateTime.now());
+            trade.setMarket(buyOrder.getMarket());
+            trade.setSecurityId(securityId);
+            if (buyOrder.getSide() == SideEnum.BUY) {
+                trade.setBuyClOrderId(buyOrder.getClOrderId());
+                trade.setSellClOrderId(sellOrder.getClOrderId());
+                trade.setBuyShareholderId(buyOrder.getShareholderId());
+                trade.setSellShareholderId(sellOrder.getShareholderId());
+            }
+
+            results.add(new RecoveryMatchResult(buyOrder, sellOrder, trade));
+            tradeRecoveryTotalCounter.increment();
+            log.info("主动撮合成交：买单[{}] vs 卖单[{}] | 股票[{}] | 价格[{}] | 成交数量[{}] | 零股开关：{}",
+                    buyOrder.getClOrderId(), sellOrder.getClOrderId(), securityId, matchPrice, tradeQty,
+                    zeroShareEnable);
+        }
+        return results;
+    }
+
+    // 数据载体类
+    @Data
+    @AllArgsConstructor
+    public static class RecoveryMatchResult {
+        private Order buyOrder;
+        private Order sellOrder;
+        private Trade trade;
     }
 
     /**
      * 判断价格是否满足撮合条件
-     * - 买订单：买价 >= 卖价
-     * - 卖订单：卖价 <= 买价
      */
-    private boolean isPriceMatch(SideEnum newOrderSide, double newOrderPrice, double counterPrice) {
-        return newOrderSide == SideEnum.BUY
-                ? newOrderPrice >= counterPrice
-                : newOrderPrice <= counterPrice;
-    }
-
-    /**
-     * 执行单笔成交逻辑（更新订单数量+状态，记录成交日志）
-     */
-    private void executeMatch(Order newOrder, Order counterOrder, int matchQty, double matchPrice) {
-        // 更新新订单数量
-        newOrder.setQty(newOrder.getQty() - matchQty);
-        // 更新对手方订单数量
-        counterOrder.setQty(counterOrder.getQty() - matchQty);
-
-        // 日志记录成交信息
-        log.info("撮合成交：新订单[{}] vs 对手方订单[{}] | 成交价格[{}] | 成交数量[{}] | " +
-                        "新订单剩余[{}] | 对手方剩余[{}]",
-                newOrder.getClOrderId(), counterOrder.getClOrderId(),
-                matchPrice, matchQty, newOrder.getQty(), counterOrder.getQty());
-    }
-
-    /**
-     * 更新新订单的最终状态
-     */
-    private void updateNewOrderStatus(Order newOrder, int remainingQty) {
-        if (remainingQty <= 0) {
-            newOrder.setStatus(OrderStatusEnum.FULL_FILLED); // 完全成交
-        } else if (remainingQty < newOrder.getQty()) {
-            newOrder.setStatus(OrderStatusEnum.PART_FILLED); // 部分成交
+    private boolean isPriceMatch(SideEnum newOrderSide, BigDecimal newOrderPrice, BigDecimal counterPrice) {
+        if (newOrderSide == SideEnum.BUY) {
+            return newOrderPrice.compareTo(counterPrice) >= 0;
         } else {
-            newOrder.setStatus(OrderStatusEnum.MATCHING); // 未成交，挂单中
+            return newOrderPrice.compareTo(counterPrice) <= 0;
         }
+    }
+
+    /**
+     * 处理撤单请求：删除订单簿中的处理过程中的订单。Redis中的processing订单不需处理。
+     */
+    public boolean handleCancelOrder(Order order) {
+        cancelRequestTotalCounter.increment();
+        String clOrderId = order.getClOrderId();
+        log.info("开始处理订单[{}]的全量撤单请求", clOrderId);
+
+        boolean removeSuccess = orderBook.removeOrder(order);
+        if (removeSuccess) {
+            log.info("订单[{}]已从订单簿全量移除，撤单完成", clOrderId);
+        } else {
+            log.error("订单[{}]从订单簿全量移除失败", clOrderId);
+        }
+
+        return removeSuccess;
+    }
+
+    /**
+     * 暴露订单簿实例给对账服务
+     */
+    public OrderBook getOrderBook() {
+        return this.orderBook;
     }
 }
